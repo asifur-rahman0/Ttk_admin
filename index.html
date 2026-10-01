@@ -96,9 +96,9 @@ function dash(){
 
 function users(){
   return `<h1>Users</h1><div class="box"><input id="q" placeholder="Search by phone, email or code" style="max-width:320px;margin-bottom:12px" oninput="window.filterUsers(this.value)">
-  <table><thead><tr><th>Phone</th><th>Email</th><th>Code</th><th>Balance</th><th>Income</th><th>Status</th><th></th></tr></thead><tbody id="ub">${userRows(S.users)}</tbody></table></div>`;
+  <table><thead><tr><th>Phone</th><th>Email</th><th>Code</th><th>Referred by</th><th>Balance</th><th>Income</th><th>Status</th><th></th></tr></thead><tbody id="ub">${userRows(S.users)}</tbody></table></div>`;
 }
-const userRows = list => list.length ? list.map(u=>`<tr><td>${esc(u.phone)}</td><td>${esc(u.email)}</td><td>${esc(u.code)}</td><td>${fmt(u.balance)}</td><td>${fmt(u.income)}</td><td><span class="tag ${u.disabled?"x":""}">${u.disabled?"Blocked":"Active"}</span></td><td><button class="sm out" data-edit="${u.id}">Edit</button></td></tr>`).join("") : `<tr><td colspan="7" style="color:var(--mute)">No users found.</td></tr>`;
+const userRows = list => list.length ? list.map(u=>`<tr><td>${esc(u.phone)}</td><td>${esc(u.email)}</td><td>${esc(u.code)}</td><td>${esc(u.referredBy ? u.referredBy.slice(0,6)+"..." : "-")}</td><td>${fmt(u.balance)}</td><td>${fmt(u.income)}</td><td><span class="tag ${u.disabled?"x":""}">${u.disabled?"Blocked":"Active"}</span></td><td><button class="sm out" data-edit="${u.id}">Edit</button></td></tr>`).join("") : `<tr><td colspan="8" style="color:var(--mute)">No users found.</td></tr>`;
 window.filterUsers = v => { v=v.toLowerCase(); $("#ub").innerHTML = userRows(S.users.filter(u=>[u.phone,u.email,u.code].join(" ").toLowerCase().includes(v))); };
 
 function orders(){
@@ -152,6 +152,7 @@ function editUser(id){
   const f = (k,l)=>`<label>${l}</label><input id="f_${k}" type="number" step="0.01" value="${u[k]||0}">`;
   const m = document.createElement("div"); m.className="modal";
   m.innerHTML = `<div class="sheet"><h2>${esc(u.phone||u.email)}</h2>${f("balance","Balance (BDT)")}${f("income","Today's income")}${f("saleAmount","Sale amount")}${f("saleOrders","Sale orders")}${f("purchaseAmount","Purchase amount")}${f("purchaseOrders","Purchase orders")}
+  <label>Set referrer (referral code or UID)</label><input id="f_ref" placeholder="${u.referredBy ? "Already set" : "e.g. ab12cd"}">
   <label><input type="checkbox" id="f_dis" style="width:auto" ${u.disabled?"checked":""}> Block this user</label>
   <div style="display:flex;gap:10px;margin-top:18px"><button id="sv">Save changes</button><button class="out" id="cn">Cancel</button></div></div>`;
   document.body.append(m);
@@ -159,7 +160,18 @@ function editUser(id){
   $("#sv").onclick = async () => {
     const d = {}; ["balance","income","saleAmount","saleOrders","purchaseAmount","purchaseOrders"].forEach(k=>d[k]=Number($("#f_"+k).value)||0);
     d.disabled = $("#f_dis").checked;
-    d.statsDate = new Date().toLocaleDateString("en-CA");
+    d.statsDate = (()=>{const x=new Date();return x.getFullYear()+"-"+String(x.getMonth()+1).padStart(2,"0")+"-"+String(x.getDate()).padStart(2,"0")})();
+    const rc = $("#f_ref").value.trim();
+    if (rc && !DEMO) {
+      try {
+        let refUid = rc;
+        if (rc.length <= 12) { const r = await fb.getDoc(fb.doc(db,"referralCodes",rc)); if (!r.exists()) return toast("Referral code not found"); refUid = r.data().uid; }
+        if (refUid === id) return toast("A user cannot refer themselves");
+        const ph = u.phone || "", nm = ph.length >= 8 ? ph.slice(0,4)+"****"+ph.slice(-3) : (u.email||"user").split("@")[0].slice(0,2)+"***";
+        d.referredBy = refUid;
+        await fb.setDoc(fb.doc(db,"users",refUid,"team",id), { name:nm, joinedAt:fb.serverTimestamp() });
+      } catch(e) { return toast("Referral link failed: "+(e.code||e.message)); }
+    }
     if (DEMO) Object.assign(u,d); else await fb.updateDoc(fb.doc(db,"users",id),d);
     m.remove(); render(); toast("Saved");
   };
