@@ -25,7 +25,7 @@ h1{font-size:24px;margin-bottom:18px}
 .box{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px;margin-top:16px;overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:14px}
 th,td{text-align:left;padding:11px 10px;border-bottom:1px solid var(--line);white-space:nowrap}th{color:var(--mute);font-weight:600}
-.tag{padding:3px 10px;border-radius:12px;font-size:12px;background:var(--mint);color:var(--gd)}.tag.x{background:#fde8e6;color:var(--red)}
+.tag{padding:3px 10px;border-radius:12px;font-size:12px;background:var(--mint);color:var(--gd)}.tag.x{background:#fde8e6;color:var(--red)}.tag.cr{background:#fff3d6;color:#8a5a00}.tag.lk{background:#ece6f7;color:#5a3d99}
 .form{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;align-items:end}
 .login{max-width:360px;margin:12vh auto;background:#fff;padding:28px;border-radius:20px;border:1px solid var(--line)}
 .err{color:var(--red);font-size:14px;margin-top:10px;min-height:18px}
@@ -71,8 +71,23 @@ if (!DEMO) try {
 const $ = s => document.querySelector(s);
 const fmt = n => Number(n || 0).toFixed(2);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const S = { admin:false, tab:"dash", users:[], orders:[], rates:{usdt:130.34,bonus:3}, err:"" };
+const S = { admin:false, tab:"dash", users:[], orders:[], rates:{usdt:130.34,bonus:3}, err:"", of:"all", oq:"", wl:{bkash:[],nagad:[]} };
 let unsubs = [];
+/* Order status: open -> created (user claimed + picked wallet) -> success / failed / lock (admin decides). Old names are mapped. */
+const NS = s => ({reserved:"created",pending:"created",done:"success",claimed:"success",rejected:"failed"})[s] || s;
+const LBL = {open:"Open",created:"Order Create",success:"Success",failed:"Failed",lock:"Lock"};
+const TC = {created:"cr",lock:"lk",failed:"x"};
+const tms = t => t?.toMillis?.() || (typeof t==="number" ? t : 0);
+/* Saved wallet numbers (shown to the user when they claim an order) */
+const WL_KEY = "nerivo_wallets";
+function loadW(){ try { const j = JSON.parse(localStorage.getItem(WL_KEY)||"null"); if (j) S.wl = { bkash:j.bkash||[], nagad:j.nagad||[] }; } catch {} }
+async function saveW(){
+  try { localStorage.setItem(WL_KEY, JSON.stringify(S.wl)); } catch {}
+  if (!DEMO) { try { await fb.setDoc(fb.doc(db,"settings","wallets"), S.wl); } catch(e) { toast("Saved on this device only ("+(e.code||"error")+")"); } }
+}
+loadW();
+window.pickNum = (id,v) => { if (v) { const el = $("#"+id); if (el) el.value = v; } };
+const fdt = ms => ms ? new Date(ms).toLocaleString() : "-";
 const toast = m => { const t=document.createElement("div"); t.className="toast"; t.textContent=m; document.body.append(t); setTimeout(()=>t.remove(),2200); };
 
 if (DEMO) {
@@ -89,41 +104,69 @@ function login(){
 
 function dash(){
   const sum = k => S.users.reduce((a,u)=>a+Number(u[k]||0),0);
-  const open = S.orders.filter(o=>o.status==="open").length, cl = S.orders.filter(o=>o.status==="done").length, pend = S.orders.filter(o=>o.status==="pending").length;
+  const n = k => S.orders.filter(o=>NS(o.status)===k).length;
   const c = (t,v)=>`<div class="card"><small>${t}</small><b>${v}</b></div>`;
-  return `<h1>Dashboard</h1><div class="cards">${c("Users",S.users.length)}${c("Total user balance",fmt(sum("balance"))+" BDT")}${c("Total income paid",fmt(sum("income"))+" BDT")}${c("Sale amount",fmt(sum("saleAmount"))+" BDT")}${c("Open orders",open)}${c("Pending payments",pend)}${c("Approved orders",cl)}</div>`;
+  return `<h1>Dashboard</h1><div class="cards">${c("Users",S.users.length)}${c("Total user balance",fmt(sum("balance"))+" BDT")}${c("Total income paid",fmt(sum("income"))+" BDT")}${c("Sale amount",fmt(sum("saleAmount"))+" BDT")}${c("Open orders",n("open"))}${c("Order Create",n("created"))}${c("Success",n("success"))}${c("Failed",n("failed"))}${c("Lock",n("lock"))}</div>`;
 }
 
 function users(){
   return `<h1>Users</h1><div class="box"><input id="q" placeholder="Search by phone, email or code" style="max-width:320px;margin-bottom:12px" oninput="window.filterUsers(this.value)">
-  <table><thead><tr><th>Phone</th><th>Email</th><th>Code</th><th>Referred by</th><th>Balance</th><th>Income</th><th>Status</th><th></th></tr></thead><tbody id="ub">${userRows(S.users)}</tbody></table></div>`;
+  <table><thead><tr><th>Phone</th><th>Code</th><th>Referred by</th><th>Last IP</th><th>Balance</th><th>Income</th><th>Status</th><th></th></tr></thead><tbody id="ub">${userRows(S.users)}</tbody></table></div>`;
 }
-const userRows = list => list.length ? list.map(u=>`<tr><td>${esc(u.phone)}</td><td>${esc(u.email)}</td><td>${esc(u.code)}</td><td>${esc(u.referredBy ? u.referredBy.slice(0,6)+"..." : "-")}</td><td>${fmt(u.balance)}</td><td>${fmt(u.income)}</td><td><span class="tag ${u.disabled?"x":""}">${u.disabled?"Blocked":"Active"}</span></td><td><button class="sm out" data-edit="${u.id}">Edit</button></td></tr>`).join("") : `<tr><td colspan="8" style="color:var(--mute)">No users found.</td></tr>`;
-window.filterUsers = v => { v=v.toLowerCase(); $("#ub").innerHTML = userRows(S.users.filter(u=>[u.phone,u.email,u.code].join(" ").toLowerCase().includes(v))); };
+const userRows = list => list.length ? list.map(u=>{ const refCode = u.referredBy ? (S.users.find(x=>x.id===u.referredBy)?.code || u.referredBy.slice(0,6)+"...") : "-"; return `<tr><td>${esc(u.phone)}</td><td>${esc(u.code)}</td><td>${esc(refCode)}</td><td>${esc(u.lastIp||"-")}</td><td>${fmt(u.balance)}</td><td>${fmt(u.income)}</td><td><span class="tag ${u.disabled?"x":""}">${u.disabled?"Blocked":"Active"}</span></td><td><button class="sm out" data-edit="${u.id}">Edit</button></td></tr>`; }).join("") : `<tr><td colspan="8" style="color:var(--mute)">No users found.</td></tr>`;
+window.filterUsers = v => { v=v.toLowerCase(); $("#ub").innerHTML = userRows(S.users.filter(u=>[u.phone,u.email,u.code,u.lastIp].join(" ").toLowerCase().includes(v))); };
 
 const lastNum = k => { try { return localStorage.getItem("nerivo_"+k) || ""; } catch { return ""; } };
 
-const userLabel = uid => { const u = S.users.find(x=>x.id===uid); return u ? (u.phone || u.email || uid.slice(0,6)) : (uid ? uid.slice(0,6)+"..." : "-"); };
+const userLabel = uid => { const u = S.users.find(x=>x.id===uid); return u ? (u.phone || u.email || uid.slice(0,6)) + " · ref " + (u.code || "-") + (u.lastIp ? " · IP " + u.lastIp : "") : (uid ? uid.slice(0,6)+"..." : "-"); };
+function oList(){
+  const q = S.oq.trim().toLowerCase();
+  return S.orders.filter(o => (S.of==="all" || NS(o.status)===S.of) && (!q || [o.amount,o.trxId,o.senderNumber,o.payMethod,o.bkashNumber,o.nagadNumber,o.mask,userLabel(o.claimedBy)].join(" ").toLowerCase().includes(q)));
+}
 function orderRows(){
-  if (!S.orders.length) return `<tr><td colspan="6" style="color:var(--mute)">No orders yet. Create the first one above.</td></tr>`;
+  if (!S.orders.length) return `<tr><td colspan="7" style="color:var(--mute)">No orders yet. Create the first one above.</td></tr>`;
+  const list = oList();
+  if (!list.length) return `<tr><td colspan="7" style="color:var(--mute)">No orders match this filter.</td></tr>`;
   const dup = {}; S.orders.forEach(o => { if (o.trxId) { const k = o.trxId.toUpperCase(); dup[k] = (dup[k]||0)+1; } });
-  const rank = {pending:0,reserved:1,open:2,done:3,rejected:4};
-  return S.orders.slice().sort((a,b)=>(rank[a.status]??5)-(rank[b.status]??5)).map(o => {
-    const proof = o.trxId ? `${esc(o.payMethod)} from ${esc(o.senderNumber)}<br>TrxID: ${esc(o.trxId)}${dup[o.trxId.toUpperCase()]>1 ? ' <span class="tag x">DUPLICATE</span>' : ""}` : "-";
-    const act = o.status === "pending" ? `<button class="sm" data-approve="${o.id}">Approve</button> <button class="sm red" data-reject="${o.id}">Reject</button>` : `<button class="sm red" data-delorder="${o.id}">Delete</button>`;
-    return `<tr><td>${fmt(o.amount)}</td><td>bKash: ${esc(o.bkashNumber||"-")}<br>Nagad: ${esc(o.nagadNumber||"-")}</td><td><span class="tag ${o.status==="rejected"?"x":""}">${esc(o.status)}</span></td><td>${esc(userLabel(o.claimedBy))}</td><td>${proof}</td><td>${act}</td></tr>`;
+  const rank = {created:0,open:1,lock:2,success:3,failed:4};
+  const when = o => tms(o.claimedAt) || tms(o.createdAt);
+  return list.slice().sort((a,b)=>((rank[NS(a.status)]??5)-(rank[NS(b.status)]??5)) || (when(b)-when(a))).map(o => {
+    const st = NS(o.status), claimed = !!o.claimedBy;
+    const proof = o.trxId ? `${esc(o.payMethod)} from ${esc(o.senderNumber)}<br>TrxID: ${esc(o.trxId)}${dup[o.trxId.toUpperCase()]>1 ? ' <span class="tag x">DUPLICATE</span>' : ""}`
+      : (o.payMethod ? `${esc(o.payMethod)}<br><span style="color:var(--mute)">TrxID not submitted</span>` : "-");
+    const opts = (claimed ? ["created","success","failed","lock","open"] : ["open","lock"]).map(k=>`<option value="${k}" ${k===st?"selected":""}>${k==="open" && claimed ? "Open (release)" : LBL[k]}</option>`).join("");
+    return `<tr><td>${esc(fdt(when(o)))}</td><td>${fmt(o.amount)}</td><td>bKash: ${esc(o.bkashNumber||"-")}<br>Nagad: ${esc(o.nagadNumber||"-")}</td><td><span class="tag ${TC[st]||""}">${esc(LBL[st]||st)}</span></td><td>${esc(userLabel(o.claimedBy))}</td><td>${proof}</td>
+    <td><select id="st_${o.id}" style="width:auto;padding:6px 8px;font-size:13px">${opts}</select> <button class="sm" data-apply="${o.id}">Apply</button> <button class="sm out" data-hist="${o.id}">History</button> <button class="sm red" data-delorder="${o.id}">Delete</button></td></tr>`;
   }).join("");
 }
+window.filterOrders = v => { S.oq = v; const b = $("#otb"); if (b) b.innerHTML = orderRows(); };
 
+function wsel(k,id){
+  return `<select onchange="window.pickNum('${id}',this.value)" style="margin-bottom:6px"><option value="">Saved ${k==="bkash"?"bKash":"Nagad"} numbers...</option>${S.wl[k].map(w=>`<option value="${esc(w.n)}">${esc(w.n)}${w.label?" · "+esc(w.label):""}</option>`).join("")}</select>`;
+}
+function walletBox(){
+  const rows = [["bkash","bKash"],["nagad","Nagad"]].flatMap(([k,l])=>S.wl[k].map((w,i)=>`<tr><td>${l}</td><td>${esc(w.n)}</td><td>${esc(w.label||"-")}</td><td><button class="sm red" data-delw="${k}:${i}">Delete</button></td></tr>`)).join("");
+  return `<div class="box"><h3 style="margin-bottom:10px">Saved wallet numbers</h3><div class="form">
+  <div><label>Type</label><select id="wt"><option value="bkash">bKash</option><option value="nagad">Nagad</option></select></div>
+  <div><label>Wallet number</label><input id="wn" type="tel" placeholder="01XXXXXXXXX"></div>
+  <div><label>Label (optional)</label><input id="wlb" placeholder="e.g. Agent 1"></div>
+  <button data-addw>Save number</button></div>
+  <table style="margin-top:12px"><thead><tr><th>Type</th><th>Number</th><th>Label</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="4" style="color:var(--mute)">No saved numbers yet. Numbers you use in an order are saved automatically.</td></tr>`}</tbody></table></div>`;
+}
 function orders(){
+  const fl = [["all","All"],["open","Open"],["created","Order Create"],["success","Success"],["failed","Failed"],["lock","Lock"]];
+  const cnt = k => k==="all" ? S.orders.length : S.orders.filter(o=>NS(o.status)===k).length;
   return `<h1>Buy orders</h1><div class="box"><h3 style="margin-bottom:10px">Create order</h3><div class="form">
   <div><label>Amount (BDT)</label><input id="oa" type="number" min="100" value="111"></div>
-  <div><label>bKash number (user sends money here)</label><input id="ob" type="tel" placeholder="01XXXXXXXXX" value="${esc(lastNum("ob"))}"></div>
-  <div><label>Nagad number (user sends money here)</label><input id="on" type="tel" placeholder="01XXXXXXXXX" value="${esc(lastNum("on"))}"></div>
+  <div><label>bKash number (user sends money here)</label>${wsel("bkash","ob")}<input id="ob" type="tel" placeholder="01XXXXXXXXX" value="${esc(lastNum("ob"))}"></div>
+  <div><label>Nagad number (user sends money here)</label>${wsel("nagad","on")}<input id="on" type="tel" placeholder="01XXXXXXXXX" value="${esc(lastNum("on"))}"></div>
   <div><label>Buyer mask</label><input id="om" placeholder="179***7kPO"></div>
   <div><label>Reward rate %</label><input id="orr" type="number" step="0.1" value="3"></div>
   <button data-addorder>Create order</button></div></div>
-  <div class="box"><table><thead><tr><th>Amount</th><th>Receive numbers</th><th>Status</th><th>User</th><th>Payment proof</th><th></th></tr></thead><tbody>${orderRows()}</tbody></table></div>`;
+  ${walletBox()}
+  <div class="box"><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${fl.map(([k,l])=>`<button class="sm ${S.of===k?"":"out"}" data-ofilter="${k}">${l} (${cnt(k)})</button>`).join("")}</div>
+  <input id="oq" placeholder="Search user phone, code, TrxID, amount..." value="${esc(S.oq)}" style="max-width:360px;margin-bottom:12px" oninput="window.filterOrders(this.value)">
+  <table><thead><tr><th>Time</th><th>Amount</th><th>Receive numbers</th><th>Status</th><th>User (claimed / created)</th><th>Payment</th><th>Change status</th></tr></thead><tbody id="otb">${orderRows()}</tbody></table></div>`;
 }
 
 function settings(){
@@ -132,10 +175,11 @@ function settings(){
 }
 
 function render(){
-  const r = $("#root");
+  const r = $("#root"), ae = document.activeElement, keepOq = ae && ae.id==="oq" ? ae.selectionStart : null;
   if (!S.admin) { r.innerHTML = login(); return; }
   const n=(k,l)=>`<button class="${S.tab===k?"act":""}" data-tab="${k}">${l}</button>`;
   r.innerHTML = `<div class="wrap"><aside><h2>Nerivo Admin</h2>${n("dash","Dashboard")}${n("users","Users")}${n("orders","Buy orders")}${n("settings","Rates")}<button data-logout style="margin-top:18px">Log out</button></aside><main>${({dash,users,orders,settings})[S.tab]()}</main></div>`;
+  if (keepOq !== null) { const el = $("#oq"); if (el) { el.focus(); try { el.setSelectionRange(keepOq,keepOq); } catch {} } }
 }
 
 /* ---------- Firebase logic ---------- */
@@ -145,6 +189,7 @@ function subscribe(){
   unsubs = [
     onSnapshot(collection(db,"users"), s=>{ S.users=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, err),
     onSnapshot(collection(db,"buyOrders"), s=>{ S.orders=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, err),
+    onSnapshot(doc(db,"settings","wallets"), s=>{ if(s.exists()){ const d=s.data(); S.wl={bkash:d.bkash||[],nagad:d.nagad||[]}; } if(S.tab!=="orders") render(); }, ()=>{}),
     onSnapshot(doc(db,"settings","rates"), s=>{ if(s.exists()) S.rates=s.data(); if(S.tab!=="settings") render(); }, err)
   ];
 }
@@ -164,10 +209,12 @@ function editUser(id){
   const u = S.users.find(x=>x.id===id);
   const f = (k,l)=>`<label>${l}</label><input id="f_${k}" type="number" step="0.01" value="${u[k]||0}">`;
   const m = document.createElement("div"); m.className="modal";
-  m.innerHTML = `<div class="sheet"><h2>${esc(u.phone||u.email)}</h2>${f("balance","Balance (BDT)")}${f("income","Today's income")}${f("saleAmount","Sale amount")}${f("saleOrders","Sale orders")}${f("purchaseAmount","Purchase amount")}${f("purchaseOrders","Purchase orders")}
+  m.innerHTML = `<div class="sheet"><h2>${esc(u.phone||u.email)}</h2>
+  <div class="box" style="margin-top:10px;padding:10px 14px;font-size:13px;color:var(--mute)">Referral code: <b>${esc(u.code||"-")}</b> &nbsp; Last IP: <b>${esc(u.lastIp||"-")}</b>${u.lastSeenAt ? " ("+esc(u.lastSeenAt.toDate ? u.lastSeenAt.toDate().toLocaleString() : "")+")" : ""}<br>Passwords cannot be viewed (Firebase never stores them in readable form). Use "Send password reset" below if the user is locked out.</div>
+  ${f("balance","Balance (BDT)")}${f("income","Today's income")}${f("saleAmount","Sale amount")}${f("saleOrders","Sale orders")}${f("purchaseAmount","Purchase amount")}${f("purchaseOrders","Purchase orders")}
   <label>Set referrer (referral code or UID)</label><input id="f_ref" placeholder="${u.referredBy ? "Already set" : "e.g. ab12cd"}">
   <label><input type="checkbox" id="f_dis" style="width:auto" ${u.disabled?"checked":""}> Block this user</label>
-  <div style="display:flex;gap:10px;margin-top:18px"><button id="sv">Save changes</button><button class="out" id="cn">Cancel</button></div></div>`;
+  <div style="display:flex;gap:10px;margin-top:18px;flex-wrap:wrap"><button id="sv">Save changes</button><button class="out" id="cn">Cancel</button></div></div>`;
   document.body.append(m);
   $("#cn").onclick = () => m.remove();
   $("#sv").onclick = async () => {
@@ -198,39 +245,74 @@ async function addOrder(){
   const o = { amount:Number($("#oa").value), type: bk && ng ? "both" : (bk ? "bkash" : "nagad"), bkashNumber:bk, nagadNumber:ng, mask:$("#om").value.trim()||"179***"+Math.random().toString(36).slice(2,6), rate:Number($("#orr").value), cancels:0, status:"open" };
   if (!(o.amount>=100)) return toast("Amount must be 100 or more");
   if (DEMO) S.orders.unshift({id:String(Date.now()),...o}); else await fb.addDoc(fb.collection(db,"buyOrders"),{...o,createdAt:fb.serverTimestamp()});
+  let ch = false; [["bkash",bk],["nagad",ng]].forEach(([k,n]) => { if (n && !S.wl[k].some(w=>w.n===n)) { S.wl[k].push({ n, label:"" }); ch = true; } });
+  if (ch) saveW();
   render(); toast("Order created");
 }
 
 const todayS = () => { const x = new Date(); return x.getFullYear()+"-"+String(x.getMonth()+1).padStart(2,"0")+"-"+String(x.getDate()).padStart(2,"0"); };
 
-async function approve(id){
-  const o = S.orders.find(x=>x.id===id); if (!o || o.status !== "pending") return;
-  if (!confirm("Approve "+fmt(o.amount)+" BDT (TrxID "+o.trxId+")? This adds the balance and reward to the user.")) return;
-  try {
-    if (DEMO) { o.status = "done"; render(); return toast("Approved (demo)"); }
-    const day = todayS();
-    await fb.runTransaction(db, async t => {
-      const oRef = fb.doc(db,"buyOrders",id), uRef = fb.doc(db,"users",o.claimedBy);
-      const [os, us] = await Promise.all([t.get(oRef), t.get(uRef)]);
-      if (!os.exists() || os.data().status !== "pending") throw new Error("This order was already handled");
-      if (!us.exists()) throw new Error("User profile not found");
-      const od = os.data(), u = us.data(), fresh = u.statsDate !== day, reward = od.amount * od.rate / 100;
-      t.update(oRef, { status:"done", reviewedAt:fb.serverTimestamp() });
-      t.update(uRef, { balance:(u.balance||0)+od.amount, income:(fresh?0:(u.income||0))+reward, purchaseAmount:(fresh?0:(u.purchaseAmount||0))+od.amount, purchaseOrders:(fresh?0:(u.purchaseOrders||0))+1, statsDate:day });
-      const L = fb.collection(db,"users",o.claimedBy,"ledger");
-      t.set(fb.doc(L,id+"_buy"), { kind:"purchase", amount:od.amount, orderId:id, createdAt:fb.serverTimestamp() });
-      t.set(fb.doc(L,id+"_reward"), { kind:"reward", amount:reward, orderId:id, createdAt:fb.serverTimestamp() });
-    });
-    toast("Approved. Balance and reward added");
-  } catch(e) { console.error(e); toast(e.message || "Approve failed"); }
+async function creditSuccess(id, entry){
+  const day = todayS();
+  await fb.runTransaction(db, async t => {
+    const oRef = fb.doc(db,"buyOrders",id), os = await t.get(oRef);
+    if (!os.exists()) throw new Error("Order not found");
+    const od = os.data(); if (!od.claimedBy) throw new Error("No user claimed this order");
+    const uRef = fb.doc(db,"users",od.claimedBy), us = await t.get(uRef);
+    if (!us.exists()) throw new Error("User profile not found");
+    const upd = { status:"success", reviewedAt:fb.serverTimestamp(), history:fb.arrayUnion(entry) };
+    if (od.credited) { t.update(oRef, upd); return; }          /* balance was already added once, never add twice */
+    const u = us.data(), fresh = u.statsDate !== day, reward = od.amount * od.rate / 100;
+    t.update(oRef, { ...upd, credited:true });
+    t.update(uRef, { balance:(u.balance||0)+od.amount, income:(fresh?0:(u.income||0))+reward, purchaseAmount:(fresh?0:(u.purchaseAmount||0))+od.amount, purchaseOrders:(fresh?0:(u.purchaseOrders||0))+1, statsDate:day });
+    const L = fb.collection(db,"users",od.claimedBy,"ledger");
+    t.set(fb.doc(L,id+"_buy"), { kind:"purchase", amount:od.amount, orderId:id, createdAt:fb.serverTimestamp() });
+    t.set(fb.doc(L,id+"_reward"), { kind:"reward", amount:reward, orderId:id, createdAt:fb.serverTimestamp() });
+  });
 }
 
-async function reject(id){
-  const o = S.orders.find(x=>x.id===id); if (!o || o.status !== "pending") return;
-  if (!confirm("Reject this payment?")) return;
-  if (DEMO) { o.status = "rejected"; render(); return; }
-  try { await fb.updateDoc(fb.doc(db,"buyOrders",id), { status:"rejected", reviewedAt:fb.serverTimestamp() }); toast("Rejected"); }
-  catch(e) { toast("Reject failed: "+(e.code||e.message)); }
+async function setStatus(id, ns){
+  const o = S.orders.find(x=>x.id===id); if (!o) return;
+  const cur = NS(o.status), claimed = !!o.claimedBy;
+  if (cur === ns) return toast("Already "+LBL[ns]);
+  if (ns === "success" && !claimed) return toast("No user has claimed this order");
+  if (ns === "open" && cur === "success") return toast("A successful order cannot be released");
+  const msg = ns === "success" ? "Mark SUCCESS? This adds "+fmt(o.amount)+" BDT balance and the reward to the user (only once)."
+    : ns === "open" ? "Release this order back to the pool? The user's claim will be removed."
+    : "Change status to "+LBL[ns]+"?"+(cur === "success" ? " The balance already added to the user stays (adjust it in Users if needed)." : "");
+  if (!confirm(msg)) { render(); return; }
+  const entry = { status:ns, by:"admin", admin:(auth?.currentUser?.email)||"admin", at:Date.now(), note:"Status changed by admin" };
+  try {
+    if (DEMO) { o.status = ns; if (ns === "open") { o.claimedBy = null; o.payMethod = null; } o.history = [...(o.history||[]), entry]; render(); return toast("Status: "+LBL[ns]); }
+    if (ns === "success") await creditSuccess(id, entry);
+    else {
+      const d = { status:ns, reviewedAt:fb.serverTimestamp(), history:fb.arrayUnion(entry) };
+      if (o.status === "done" || o.status === "claimed") d.credited = true;   /* old approved orders were already credited */
+      if (ns === "open") Object.assign(d, { claimedBy:null, claimedAt:null, payMethod:null, senderNumber:null, trxId:null });
+      await fb.updateDoc(fb.doc(db,"buyOrders",id), d);
+    }
+    toast("Status: "+LBL[ns]);
+  } catch(e) { console.error(e); toast(e.message || "Update failed"); render(); }
+}
+
+function showHistory(id){
+  const o = S.orders.find(x=>x.id===id); if (!o) return;
+  const ev = [];
+  if (tms(o.createdAt)) ev.push({ at:tms(o.createdAt), t:"Order created by admin ("+fmt(o.amount)+" BDT)" });
+  const hs = o.history || [];
+  hs.forEach(h => ev.push({ at:h.at||0, t:(h.by === "admin" ? "Admin"+(h.admin ? " ("+h.admin+")" : "") : "User "+userLabel(h.uid||o.claimedBy))+" → "+(LBL[NS(h.status)]||h.status)+(h.note ? " — "+h.note : "") }));
+  if (!hs.length) {      /* old orders without a history log */
+    if (tms(o.claimedAt)) ev.push({ at:tms(o.claimedAt), t:"Claimed by "+userLabel(o.claimedBy) });
+    if (tms(o.submittedAt)) ev.push({ at:tms(o.submittedAt), t:"Payment proof submitted ("+(o.trxId||"-")+")" });
+    if (tms(o.reviewedAt)) ev.push({ at:tms(o.reviewedAt), t:"Reviewed by admin → "+(LBL[NS(o.status)]||o.status) });
+  }
+  ev.sort((a,b)=>a.at-b.at);
+  const st = NS(o.status), m = document.createElement("div"); m.className = "modal";
+  m.innerHTML = `<div class="sheet"><h2>Order history · ${fmt(o.amount)} BDT</h2>
+  <div class="box" style="margin-top:10px;padding:10px 14px;font-size:13px;line-height:1.7">Status: <span class="tag ${TC[st]||""}">${esc(LBL[st]||st)}</span><br>User: <b>${esc(userLabel(o.claimedBy))}</b><br>Wallet: <b>${esc(o.payMethod||"-")}</b>${o.trxId ? "<br>Sent from: <b>"+esc(o.senderNumber)+"</b> · TrxID: <b>"+esc(o.trxId)+"</b>" : ""}</div>
+  <div style="margin-top:14px">${ev.length ? ev.map(e=>`<div style="padding:9px 0;border-bottom:1px solid var(--line);font-size:14px"><div style="color:var(--mute);font-size:12px">${esc(fdt(e.at))}</div>${esc(e.t)}</div>`).join("") : `<div style="color:var(--mute)">No history yet.</div>`}</div>
+  <button class="out" id="hc" style="margin-top:16px;width:100%">Close</button></div>`;
+  document.body.append(m); $("#hc").onclick = () => m.remove();
 }
 
 document.addEventListener("click", async e=>{
@@ -244,8 +326,19 @@ document.addEventListener("click", async e=>{
     if (DEMO) S.orders = S.orders.filter(o=>o.id!==d.delorder); else await fb.deleteDoc(fb.doc(db,"buyOrders",d.delorder));
     render(); toast("Deleted");
   }
-  else if ("approve" in d) approve(d.approve);
-  else if ("reject" in d) reject(d.reject);
+  else if ("apply" in d) { const sel = $("#st_"+d.apply); if (sel) setStatus(d.apply, sel.value); }
+  else if ("hist" in d) showHistory(d.hist);
+  else if ("ofilter" in d) { S.of = d.ofilter; render(); }
+  else if ("addw" in d) {
+    const k = $("#wt").value, n = $("#wn").value.trim(), label = $("#wlb").value.trim();
+    if (!/^01\d{9}$/.test(n)) return toast("Number must be 11 digits starting with 01");
+    if (S.wl[k].some(w=>w.n===n)) return toast("This number is already saved");
+    S.wl[k].push({ n, label }); await saveW(); render(); toast("Number saved");
+  }
+  else if ("delw" in d) {
+    const [k,i] = d.delw.split(":"); if (!confirm("Delete this saved number? Existing orders keep their number.")) return;
+    S.wl[k].splice(+i,1); await saveW(); render(); toast("Deleted");
+  }
   else if ("saverates" in d) {
     const r = { usdt:Number($("#ru").value), bonus:Number($("#rb").value) };
     if (DEMO) S.rates=r; else await fb.setDoc(fb.doc(db,"settings","rates"),r);
