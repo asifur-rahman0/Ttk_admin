@@ -89,9 +89,9 @@ function login(){
 
 function dash(){
   const sum = k => S.users.reduce((a,u)=>a+Number(u[k]||0),0);
-  const open = S.orders.filter(o=>o.status==="open").length, cl = S.orders.filter(o=>o.status==="claimed").length;
+  const open = S.orders.filter(o=>o.status==="open").length, cl = S.orders.filter(o=>o.status==="done").length, pend = S.orders.filter(o=>o.status==="pending").length;
   const c = (t,v)=>`<div class="card"><small>${t}</small><b>${v}</b></div>`;
-  return `<h1>Dashboard</h1><div class="cards">${c("Users",S.users.length)}${c("Total user balance",fmt(sum("balance"))+" BDT")}${c("Total income paid",fmt(sum("income"))+" BDT")}${c("Sale amount",fmt(sum("saleAmount"))+" BDT")}${c("Open orders",open)}${c("Claimed orders",cl)}</div>`;
+  return `<h1>Dashboard</h1><div class="cards">${c("Users",S.users.length)}${c("Total user balance",fmt(sum("balance"))+" BDT")}${c("Total income paid",fmt(sum("income"))+" BDT")}${c("Sale amount",fmt(sum("saleAmount"))+" BDT")}${c("Open orders",open)}${c("Pending payments",pend)}${c("Approved orders",cl)}</div>`;
 }
 
 function users(){
@@ -101,16 +101,29 @@ function users(){
 const userRows = list => list.length ? list.map(u=>`<tr><td>${esc(u.phone)}</td><td>${esc(u.email)}</td><td>${esc(u.code)}</td><td>${esc(u.referredBy ? u.referredBy.slice(0,6)+"..." : "-")}</td><td>${fmt(u.balance)}</td><td>${fmt(u.income)}</td><td><span class="tag ${u.disabled?"x":""}">${u.disabled?"Blocked":"Active"}</span></td><td><button class="sm out" data-edit="${u.id}">Edit</button></td></tr>`).join("") : `<tr><td colspan="8" style="color:var(--mute)">No users found.</td></tr>`;
 window.filterUsers = v => { v=v.toLowerCase(); $("#ub").innerHTML = userRows(S.users.filter(u=>[u.phone,u.email,u.code].join(" ").toLowerCase().includes(v))); };
 
+const lastNum = k => { try { return localStorage.getItem("nerivo_"+k) || ""; } catch { return ""; } };
+
+const userLabel = uid => { const u = S.users.find(x=>x.id===uid); return u ? (u.phone || u.email || uid.slice(0,6)) : (uid ? uid.slice(0,6)+"..." : "-"); };
+function orderRows(){
+  if (!S.orders.length) return `<tr><td colspan="6" style="color:var(--mute)">No orders yet. Create the first one above.</td></tr>`;
+  const dup = {}; S.orders.forEach(o => { if (o.trxId) { const k = o.trxId.toUpperCase(); dup[k] = (dup[k]||0)+1; } });
+  const rank = {pending:0,reserved:1,open:2,done:3,rejected:4};
+  return S.orders.slice().sort((a,b)=>(rank[a.status]??5)-(rank[b.status]??5)).map(o => {
+    const proof = o.trxId ? `${esc(o.payMethod)} from ${esc(o.senderNumber)}<br>TrxID: ${esc(o.trxId)}${dup[o.trxId.toUpperCase()]>1 ? ' <span class="tag x">DUPLICATE</span>' : ""}` : "-";
+    const act = o.status === "pending" ? `<button class="sm" data-approve="${o.id}">Approve</button> <button class="sm red" data-reject="${o.id}">Reject</button>` : `<button class="sm red" data-delorder="${o.id}">Delete</button>`;
+    return `<tr><td>${fmt(o.amount)}</td><td>bKash: ${esc(o.bkashNumber||"-")}<br>Nagad: ${esc(o.nagadNumber||"-")}</td><td><span class="tag ${o.status==="rejected"?"x":""}">${esc(o.status)}</span></td><td>${esc(userLabel(o.claimedBy))}</td><td>${proof}</td><td>${act}</td></tr>`;
+  }).join("");
+}
+
 function orders(){
   return `<h1>Buy orders</h1><div class="box"><h3 style="margin-bottom:10px">Create order</h3><div class="form">
   <div><label>Amount (BDT)</label><input id="oa" type="number" min="100" value="111"></div>
-  <div><label>Wallet</label><select id="ot"><option value="bkash">bKash</option><option value="nagad">Nagad</option></select></div>
+  <div><label>bKash number (user sends money here)</label><input id="ob" type="tel" placeholder="01XXXXXXXXX" value="${esc(lastNum("ob"))}"></div>
+  <div><label>Nagad number (user sends money here)</label><input id="on" type="tel" placeholder="01XXXXXXXXX" value="${esc(lastNum("on"))}"></div>
   <div><label>Buyer mask</label><input id="om" placeholder="179***7kPO"></div>
   <div><label>Reward rate %</label><input id="orr" type="number" step="0.1" value="3"></div>
   <button data-addorder>Create order</button></div></div>
-  <div class="box"><table><thead><tr><th>Amount</th><th>Wallet</th><th>Buyer</th><th>Rate</th><th>Status</th><th>Claimed by</th><th></th></tr></thead><tbody>
-  ${S.orders.length ? S.orders.map(o=>`<tr><td>${fmt(o.amount)}</td><td>${esc(o.type)}</td><td>${esc(o.mask)}</td><td>${esc(o.rate)}%</td><td><span class="tag ${o.status==="open"?"":"x"}">${esc(o.status)}</span></td><td>${esc(o.claimedBy||"-")}</td><td><button class="sm red" data-delorder="${o.id}">Delete</button></td></tr>`).join("") : `<tr><td colspan="7" style="color:var(--mute)">No orders yet. Create the first one above.</td></tr>`}
-  </tbody></table></div>`;
+  <div class="box"><table><thead><tr><th>Amount</th><th>Receive numbers</th><th>Status</th><th>User</th><th>Payment proof</th><th></th></tr></thead><tbody>${orderRows()}</tbody></table></div>`;
 }
 
 function settings(){
@@ -178,10 +191,46 @@ function editUser(id){
 }
 
 async function addOrder(){
-  const o = { amount:Number($("#oa").value), type:$("#ot").value, mask:$("#om").value.trim()||"179***"+Math.random().toString(36).slice(2,6), rate:Number($("#orr").value), cancels:0, status:"open" };
+  const bk = $("#ob").value.trim(), ng = $("#on").value.trim(), okn = n => /^01\d{9}$/.test(n);
+  if ((bk && !okn(bk)) || (ng && !okn(ng))) return toast("Numbers must be 11 digits starting with 01");
+  if (!bk && !ng) return toast("Enter a bKash or Nagad number");
+  try { localStorage.setItem("nerivo_ob", bk); localStorage.setItem("nerivo_on", ng); } catch {}
+  const o = { amount:Number($("#oa").value), type: bk && ng ? "both" : (bk ? "bkash" : "nagad"), bkashNumber:bk, nagadNumber:ng, mask:$("#om").value.trim()||"179***"+Math.random().toString(36).slice(2,6), rate:Number($("#orr").value), cancels:0, status:"open" };
   if (!(o.amount>=100)) return toast("Amount must be 100 or more");
   if (DEMO) S.orders.unshift({id:String(Date.now()),...o}); else await fb.addDoc(fb.collection(db,"buyOrders"),{...o,createdAt:fb.serverTimestamp()});
   render(); toast("Order created");
+}
+
+const todayS = () => { const x = new Date(); return x.getFullYear()+"-"+String(x.getMonth()+1).padStart(2,"0")+"-"+String(x.getDate()).padStart(2,"0"); };
+
+async function approve(id){
+  const o = S.orders.find(x=>x.id===id); if (!o || o.status !== "pending") return;
+  if (!confirm("Approve "+fmt(o.amount)+" BDT (TrxID "+o.trxId+")? This adds the balance and reward to the user.")) return;
+  try {
+    if (DEMO) { o.status = "done"; render(); return toast("Approved (demo)"); }
+    const day = todayS();
+    await fb.runTransaction(db, async t => {
+      const oRef = fb.doc(db,"buyOrders",id), uRef = fb.doc(db,"users",o.claimedBy);
+      const [os, us] = await Promise.all([t.get(oRef), t.get(uRef)]);
+      if (!os.exists() || os.data().status !== "pending") throw new Error("This order was already handled");
+      if (!us.exists()) throw new Error("User profile not found");
+      const od = os.data(), u = us.data(), fresh = u.statsDate !== day, reward = od.amount * od.rate / 100;
+      t.update(oRef, { status:"done", reviewedAt:fb.serverTimestamp() });
+      t.update(uRef, { balance:(u.balance||0)+od.amount, income:(fresh?0:(u.income||0))+reward, purchaseAmount:(fresh?0:(u.purchaseAmount||0))+od.amount, purchaseOrders:(fresh?0:(u.purchaseOrders||0))+1, statsDate:day });
+      const L = fb.collection(db,"users",o.claimedBy,"ledger");
+      t.set(fb.doc(L,id+"_buy"), { kind:"purchase", amount:od.amount, orderId:id, createdAt:fb.serverTimestamp() });
+      t.set(fb.doc(L,id+"_reward"), { kind:"reward", amount:reward, orderId:id, createdAt:fb.serverTimestamp() });
+    });
+    toast("Approved. Balance and reward added");
+  } catch(e) { console.error(e); toast(e.message || "Approve failed"); }
+}
+
+async function reject(id){
+  const o = S.orders.find(x=>x.id===id); if (!o || o.status !== "pending") return;
+  if (!confirm("Reject this payment?")) return;
+  if (DEMO) { o.status = "rejected"; render(); return; }
+  try { await fb.updateDoc(fb.doc(db,"buyOrders",id), { status:"rejected", reviewedAt:fb.serverTimestamp() }); toast("Rejected"); }
+  catch(e) { toast("Reject failed: "+(e.code||e.message)); }
 }
 
 document.addEventListener("click", async e=>{
@@ -195,6 +244,8 @@ document.addEventListener("click", async e=>{
     if (DEMO) S.orders = S.orders.filter(o=>o.id!==d.delorder); else await fb.deleteDoc(fb.doc(db,"buyOrders",d.delorder));
     render(); toast("Deleted");
   }
+  else if ("approve" in d) approve(d.approve);
+  else if ("reject" in d) reject(d.reject);
   else if ("saverates" in d) {
     const r = { usdt:Number($("#ru").value), bonus:Number($("#rb").value) };
     if (DEMO) S.rates=r; else await fb.setDoc(fb.doc(db,"settings","rates"),r);
