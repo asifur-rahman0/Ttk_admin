@@ -167,15 +167,15 @@ function walletBox(){
   <div><label>Wallet number</label><input id="wn" type="tel" placeholder="01XXXXXXXXX"></div>
   <div><label>Label (optional)</label><input id="wlb" placeholder="e.g. Agent 1"></div>
   <button data-addw>Save number</button></div>
-  <table style="margin-top:12px"><thead><tr><th>Type</th><th>Number</th><th>Label</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="4" style="color:var(--mute)">No saved numbers yet. Numbers you use in an order are saved automatically.</td></tr>`}</tbody></table></div>`;
+  <table style="margin-top:12px"><thead><tr><th>Type</th><th>Number</th><th>Label</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="4" style="color:var(--mute)">No saved numbers yet. Numbers typed in an order are not saved; add them here if you want to reuse them.</td></tr>`}</tbody></table></div>`;
 }
 function orders(){
   const fl = [["all","All"],["open","Open"],["created","Order Create"],["pending","Pending"],["success","Success"],["failed","Failed"],["lock","Lock"]];
   const cnt = k => k==="all" ? S.orders.length : S.orders.filter(o=>OS(o)===k).length;
   return `<h1>Buy orders</h1><div class="box"><h3 style="margin-bottom:10px">Create order</h3><div class="form">
   <div><label>Amount (BDT)</label><input id="oa" type="number" min="100" value="111"></div>
-  <div><label>bKash number (user sends money here)</label>${wsel("bkash","ob")}<input id="ob" type="tel" placeholder="01XXXXXXXXX" value="${esc(lastNum("ob"))}"></div>
-  <div><label>Nagad number (user sends money here)</label>${wsel("nagad","on")}<input id="on" type="tel" placeholder="01XXXXXXXXX" value="${esc(lastNum("on"))}"></div>
+  <div><label>bKash number (user sends money here)</label>${wsel("bkash","ob")}<input id="ob" type="tel" placeholder="01XXXXXXXXX" value=""></div>
+  <div><label>Nagad number (user sends money here)</label>${wsel("nagad","on")}<input id="on" type="tel" placeholder="01XXXXXXXXX" value=""></div>
   <div><label>Buyer mask</label><input id="om" placeholder="179***7kPO"></div>
   <div><label>Reward rate %</label><input id="orr" type="number" step="0.1" value="3"></div>
   <button data-addorder>Create order</button></div></div>
@@ -260,7 +260,6 @@ async function addOrder(){
   const bk = $("#ob").value.trim(), ng = $("#on").value.trim(), okn = n => /^01\d{9}$/.test(n);
   if ((bk && !okn(bk)) || (ng && !okn(ng))) return toast("Numbers must be 11 digits starting with 01");
   if (!bk && !ng) return toast("Enter a bKash or Nagad number");
-  try { localStorage.setItem("nerivo_ob", bk); localStorage.setItem("nerivo_on", ng); } catch {}
   const o = { amount:Number($("#oa").value), type: bk && ng ? "both" : (bk ? "bkash" : "nagad"), bkashNumber:bk, nagadNumber:ng, mask:$("#om").value.trim()||"179***"+Math.random().toString(36).slice(2,6), rate:Number($("#orr").value), cancels:0, status:"open" };
   if (!(o.amount>=100)) return toast("Amount must be 100 or more");
   try {
@@ -269,8 +268,6 @@ async function addOrder(){
     console.error(e);
     return toast("Create order failed: "+(e.code||e.message)+" | project: "+((db&&db.app&&db.app.options&&db.app.options.projectId)||"?")+" | admin: "+adminEmail());
   }
-  let ch = false; [["bkash",bk],["nagad",ng]].forEach(([k,n]) => { if (n && !S.wl[k].some(w=>w.n===n)) { S.wl[k].push({ n, label:"" }); ch = true; } });
-  if (ch) saveW();
   render(); toast("Order created");
 }
 
