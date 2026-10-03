@@ -206,6 +206,28 @@ function sellRows(){
   }).join("");
 }
 window.sfSet = (k,v) => { S.sellForm[k] = v; };
+function sfHistory(){
+  const f = S.sellForm, u = f.u && S.users.find(x=>x.id===f.u);
+  if (!u) return "";
+  const hb = f.hb || "all", hs = f.hs || "all";
+  const rng = v => { const a = new Date(); a.setHours(0,0,0,0); if (v==="all") a.setDate(a.getDate()-29); else a.setDate(a.getDate()-Number(v)); const b = new Date(a); b.setDate(b.getDate()+(v==="all" ? 30 : 1)); return [a.getTime(), b.getTime()]; };
+  const inR = (t,v) => { const [a,b] = rng(v); return t>=a && t<b; };
+  const opts = cur => `<option value="all" ${cur==="all"?"selected":""}>Last 30 days</option><option value="0" ${cur==="0"?"selected":""}>Today</option>` + Array.from({length:29},(_,i)=>i+1).map(d=>`<option value="${d}" ${String(cur)===String(d)?"selected":""}>${d} day${d>1?"s":""} ago</option>`).join("");
+  const bt = o => tms(o.claimedAt) || tms(o.submittedAt) || tms(o.createdAt);
+  const stt = o => tms(o.createdAt) || (o.history && o.history[0] && o.history[0].at) || 0;
+  const buys = S.orders.filter(o=>o.claimedBy===u.id && inR(bt(o),hb)).sort((a,b)=>bt(b)-bt(a));
+  const sl = S.sells.filter(o=>o.userId===u.id && inR(stt(o),hs)).sort((a,b)=>stt(b)-stt(a));
+  const sum = l => fmt(l.reduce((a,o)=>a+Number(o.amount||0),0));
+  const box = (title, key, cur, list, head, rows) => `<div class="box"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px"><h3 style="margin:0">${title}</h3><select style="width:auto;padding:6px 8px;font-size:13px" onchange="window.sfHF('${key}',this.value)">${opts(cur)}</select></div><div style="font-size:13px;color:var(--mute);margin-bottom:8px">${list.length} order${list.length===1?"":"s"} · ${sum(list)} BDT</div>${list.length ? `<div style="overflow:auto;max-height:320px"><table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>` : `<div style="color:var(--mute);font-size:14px">No orders in this period.</div>`}</div>`;
+  const brow = buys.map(o=>{ const st = OS(o); return `<tr><td>${esc(fdt(bt(o)))}</td><td>${fmt(o.amount)}</td><td><span class="tag ${TC[st]||""}">${esc(LBL[st]||st)}</span></td><td>${o.payMethod ? esc(payName(o.payMethod)) : "-"}${o.trxId ? "<br>"+esc(o.trxId) : ""}</td></tr>`; }).join("");
+  const srow = sl.map(o=>`<tr><td>${esc(fdt(stt(o)))}</td><td>${fmt(o.amount)}</td><td><span class="tag ${STC[o.status]||""}">${esc(SL[o.status]||o.status)}</span></td><td>${esc(payName(o.method))}<br>${esc(o.number)}</td></tr>`).join("");
+  return `<div style="font-size:14px;margin:0 0 8px"><b>${esc(uName(u)||u.id.slice(0,6))}</b> · ref ${esc(u.code||"-")} · Current balance: <b>${fmt(u.balance||0)} BDT</b></div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px">
+  ${box("Buy history","hb",hb,buys,"<th>Time</th><th>Amount</th><th>Status</th><th>Payment</th>",brow)}
+  ${box("Sell history","hs",hs,sl,"<th>Time</th><th>Amount</th><th>Status</th><th>Wallet</th>",srow)}
+  </div>`;
+}
+window.sfHF = (k,v) => { S.sellForm[k] = v; const h = $("#sf_hist"); if (h) h.innerHTML = sfHistory(); };
 function sfResults(){
   const f = S.sellForm, sel = f.u && S.users.find(x=>x.id===f.u);
   if (sel) return `<div style="margin-top:8px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font-size:14px;line-height:1.6"><b>${esc(uName(sel)||sel.id.slice(0,6))}</b> · ref ${esc(sel.code||"-")}<br>Current balance: <b>${fmt(sel.balance||0)} BDT</b> <button class="sm out" data-sfclear style="margin-left:6px">Change</button></div>`;
@@ -259,6 +281,7 @@ function sells(){
   <div><label>Send money via</label><select id="sf_m" onchange="window.sfSet('m',this.value)"><option value="bkash" ${f.m==="bkash"?"selected":""}>bKash</option><option value="nagad" ${f.m==="nagad"?"selected":""}>Nagad</option></select></div>
   <div><label>Receive number (user's wallet)</label><input id="sf_n" type="tel" placeholder="01XXXXXXXXX" value="${esc(f.n)}" oninput="window.sfSet('n',this.value)">${hint}</div>
   <button data-addsell>Create sell order</button></div></div>
+  <div id="sf_hist">${sfHistory()}</div>
   <div class="box"><p style="font-size:14px;color:var(--mute);line-height:1.6;margin-bottom:12px">Users cannot sell by themselves. Create the sell order here: the amount is cut from the user's balance at once and the request shows below as <b>Processing</b> (the user sees it in Order History → BDT Sell). The user's online wallet number is shown when you pick the user. To collect the money, create a task yourself in <b>Buy orders</b> with that number, or send the money directly. Nothing changes automatically: mark the request <b>Success</b> or <b>Failed</b> (the amount is refunded to the user, only once) yourself, whenever you decide. <b>Lock</b> holds the request and keeps the balance cut.</p>
   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${fl.map(([k,l])=>`<button class="sm ${S.sf===k?"":"out"}" data-sofilter="${k}">${l} (${cnt(k)})</button>`).join("")}</div>
   <input id="sq" placeholder="Search user, number, amount..." value="${esc(S.sq)}" style="max-width:360px;margin-bottom:12px" oninput="window.filterSells(this.value)">
