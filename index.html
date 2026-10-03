@@ -199,13 +199,13 @@ function render(){
 /* ---------- Firebase logic ---------- */
 function subscribe(){
   const {collection,doc,onSnapshot} = fb;
-  const err = e => toast("Permission or network error");
+  const err = n => e => { console.error(n, e); toast("Cannot read "+n+": "+(e.code||e.message)); };
   unsubs = [
-    onSnapshot(collection(db,"users"), s=>{ S.users=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, err),
-    onSnapshot(collection(db,"buyOrders"), s=>{ S.orders=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, err),
+    onSnapshot(collection(db,"users"), s=>{ S.users=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, err("users")),
+    onSnapshot(collection(db,"buyOrders"), s=>{ S.orders=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, err("buyOrders")),
     onSnapshot(doc(db,"settings","reasons"), s=>{ if(s.exists() && Array.isArray(s.data().list)) S.reasons=s.data().list; if(S.tab!=="settings") render(); }, ()=>{}),
     onSnapshot(doc(db,"settings","wallets"), s=>{ if(s.exists()){ const d=s.data(); S.wl={bkash:d.bkash||[],nagad:d.nagad||[]}; } if(S.tab!=="orders") render(); }, ()=>{}),
-    onSnapshot(doc(db,"settings","rates"), s=>{ if(s.exists()) S.rates=s.data(); if(S.tab!=="settings") render(); }, err)
+    onSnapshot(doc(db,"settings","rates"), s=>{ if(s.exists()) S.rates=s.data(); if(S.tab!=="settings") render(); }, err("settings/rates"))
   ];
 }
 
@@ -257,7 +257,12 @@ async function addOrder(){
   try { localStorage.setItem("nerivo_ob", bk); localStorage.setItem("nerivo_on", ng); } catch {}
   const o = { amount:Number($("#oa").value), type: bk && ng ? "both" : (bk ? "bkash" : "nagad"), bkashNumber:bk, nagadNumber:ng, mask:$("#om").value.trim()||"179***"+Math.random().toString(36).slice(2,6), rate:Number($("#orr").value), cancels:0, status:"open" };
   if (!(o.amount>=100)) return toast("Amount must be 100 or more");
-  if (DEMO) S.orders.unshift({id:String(Date.now()),...o}); else await fb.addDoc(fb.collection(db,"buyOrders"),{...o,createdAt:fb.serverTimestamp()});
+  try {
+    if (DEMO) S.orders.unshift({id:String(Date.now()),...o}); else await fb.addDoc(fb.collection(db,"buyOrders"),{...o,createdAt:fb.serverTimestamp()});
+  } catch(e) {
+    console.error(e);
+    return toast("Create order failed: "+(e.code||e.message)+" | project: "+((db&&db.app&&db.app.options&&db.app.options.projectId)||"?")+" | admin: "+adminEmail());
+  }
   let ch = false; [["bkash",bk],["nagad",ng]].forEach(([k,n]) => { if (n && !S.wl[k].some(w=>w.n===n)) { S.wl[k].push({ n, label:"" }); ch = true; } });
   if (ch) saveW();
   render(); toast("Order created");
