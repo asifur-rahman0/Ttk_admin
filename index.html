@@ -3,12 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="only light"><meta name="supported-color-schemes" content="light">
 <meta name="theme-color" content="#1d93f2">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Sora:wght@600;700;800&display=swap" rel="stylesheet">
-<title>Nerivo Admin</title>
+<title>Nova Pay Admin</title>
 <style>
-:root{--g:#1383e6;--gd:#0a2f55;--sky:#38b6ff;--mint:#eaf6ff;--mint2:#d5ebff;--line:#d3e5f4;--mute:#6a8399;--ink:#0c2238;--red:#c0392b;--shadow:0 10px 24px -12px rgba(19,131,230,.35);--display:"Sora","Segoe UI",system-ui,sans-serif;--body:"Figtree","Segoe UI",Roboto,system-ui,sans-serif}
+:root{color-scheme:only light;--g:#1383e6;--gd:#0a2f55;--sky:#38b6ff;--mint:#eaf6ff;--mint2:#d5ebff;--line:#d3e5f4;--mute:#6a8399;--ink:#0c2238;--red:#c0392b;--shadow:0 10px 24px -12px rgba(19,131,230,.35);--display:"Sora","Segoe UI",system-ui,sans-serif;--body:"Figtree","Segoe UI",Roboto,system-ui,sans-serif}
 *{box-sizing:border-box;margin:0}
 body{font-family:var(--body);font-size:14px;line-height:1.4;background:radial-gradient(900px 380px at 60% -90px,#cfe9ff,#eef7ff 55%,#f7fbff);color:var(--ink)}
 button{font:inherit;font-weight:600;cursor:pointer;border:0;border-radius:11px;padding:8px 14px;background:linear-gradient(160deg,#42b9ff,#1383e6);color:#fff;box-shadow:0 8px 14px -9px rgba(19,131,230,.9);transition:filter .15s}
@@ -114,19 +115,23 @@ const uName = u => u.phone || (u.email||"").replace(/@nerivo\.local$/,"");
 const uStatus = u => u.accountStatus || (u.disabled ? "banned" : "active");
 const DEFAULT_REASONS = [ { id:"system_credit", label:"System Credit", type:"credit" }, { id:"withdraw", label:"Withdraw", type:"debit" }, { id:"system_debit", label:"System Debit", type:"debit" } ];
 S.reasons = DEFAULT_REASONS.map(r => ({...r}));
+S.tuts = [];
+S.sup = [];
+S.rcodes = [];
+S.rc = { amount:"", code:"", target:"all", ref:"", max:"" };
 const RT = { credit:"Add balance", debit:"Cut balance", both:"Add & Cut" };
 const modal = html => { const m = document.createElement("div"); m.className = "modal"; m.innerHTML = `<div class="sheet">${html}</div>`; document.body.append(m); return m; };
 const adminEmail = () => (auth?.currentUser?.email) || "admin";
 const toast = m => { const t=document.createElement("div"); t.className="toast"; t.textContent=m; document.body.append(t); setTimeout(()=>t.remove(),2200); };
 
 if (DEMO) {
-  S.users = [{id:"u1",phone:"+8801840000059",email:"demo@nerivo.app",balance:13.63,income:1245.46,saleAmount:45222,saleOrders:39,purchaseAmount:0,purchaseOrders:0,code:"WcLvJ8"}];
+  S.users = [{id:"u1",phone:"+8801840000059",email:"demo@novapay.app",balance:13.63,income:1245.46,saleAmount:45222,saleOrders:39,purchaseAmount:0,purchaseOrders:0,code:"WcLvJ8"}];
   S.orders = [{id:"a",amount:111,type:"bkash",mask:"179***7kPO",rate:3,cancels:0,status:"open"},{id:"b",amount:110,type:"nagad",mask:"179***q0HO",rate:3,cancels:0,status:"claimed"}];
 }
 
 /* ---------- Views ---------- */
 function login(){
-  return `<div class="login"><h1 style="margin-bottom:4px">Nerivo Admin</h1><p style="color:var(--mute);font-size:14px">${DEMO?"Demo mode: Firebase not set up. Tap Log in to preview.":"Only accounts listed in the admins collection can enter."}</p>
+  return `<div class="login"><h1 style="margin-bottom:4px">Nova Pay Admin</h1><p style="color:var(--mute);font-size:14px">${DEMO?"Demo mode: Firebase not set up. Tap Log in to preview.":"Only accounts listed in the admins collection can enter."}</p>
   <label>Email</label><input id="em" type="email" autocomplete="email"><label>Password</label><input id="pw" type="password" autocomplete="current-password">
   <div class="err">${esc(S.err)}</div><button style="width:100%;margin-top:8px" data-login>Log in</button></div>`;
 }
@@ -302,20 +307,98 @@ function sells(){
   <table><thead><tr><th>Time</th><th>Amount</th><th>Send money to</th><th>Status</th><th>User</th><th>Change status</th></tr></thead><tbody id="stb">${sellRows()}</tbody></table></div>`;
 }
 
+const supIcon = (type, size) => {
+  const tg = type === "telegram", sz = size || 40;
+  return `<span style="display:inline-grid;place-items:center;flex:none;width:${sz}px;height:${sz}px;border-radius:50%;background:${tg ? "#229ED9" : "#25D366"}"><svg width="${Math.round(sz*0.58)}" height="${Math.round(sz*0.58)}" viewBox="0 0 24 24" aria-hidden="true">${tg
+    ? '<path fill="#fff" d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/>'
+    : '<path fill="#fff" d="M12 2.2a9.8 9.8 0 0 0-8.4 14.8L2.2 21.8l5-1.3A9.8 9.8 0 1 0 12 2.2z"/><path fill="#25D366" d="M8.7 7.2c.3-.3.9-.3 1.1.2l.8 1.7c.1.3 0 .6-.2.8l-.6.7c.7 1.5 1.8 2.6 3.3 3.3l.7-.7c.2-.2.5-.3.8-.2l1.7.8c.5.2.5.8.2 1.1-.7.8-1.5 1.2-2.5 1.1-3.2-.4-6-3.2-6.4-6.4-.1-1 .3-1.9.9-2.4z"/>'}</svg></span>`;
+};
+const supName = t => t === "telegram" ? "Telegram" : "WhatsApp";
+const supUrl = (type, raw) => {
+  raw = String(raw||"").trim();
+  if (/^https?:\/\/\S+$/i.test(raw)) return raw;
+  if (type === "telegram" && /^@?[A-Za-z0-9_]{4,}$/.test(raw)) return "https://t.me/" + raw.replace(/^@/, "");
+  if (type === "whatsapp" && /^\+?\d{8,15}$/.test(raw)) return "https://wa.me/" + raw.replace(/\D/g, "");
+  return "";
+};
+const supRows = () => S.sup.map((x,i)=>`<tr><td>${supIcon(x.type,30)}</td><td>${esc(x.label)}<br><span style="font-size:12px;color:var(--mute)">${supName(x.type)}</span></td><td style="max-width:220px;overflow:hidden;text-overflow:ellipsis"><a href="${esc(x.url)}" target="_blank" rel="noopener" style="color:var(--g)">${esc(x.url)}</a></td><td>${i>0 ? `<button class="sm out" data-upsup="${esc(x.id)}">↑</button> ` : ""}<button class="sm red" data-delsup="${esc(x.id)}">Delete</button></td></tr>`).join("");
+const tutRows = () => S.tuts.map((t,i)=>`<tr><td>${i+1}</td><td>${esc(t.title)}${t.sub ? `<br><span style="font-size:12px;color:var(--mute)">${esc(t.sub)}</span>` : ""}</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis"><a href="${esc(t.url)}" target="_blank" rel="noopener" style="color:var(--g)">${esc(t.url)}</a></td><td>${i>0 ? `<button class="sm out" data-uptut="${esc(t.id)}">↑</button> ` : ""}<button class="sm red" data-deltut="${esc(t.id)}">Delete</button></td></tr>`).join("");
+/* ---------- Redeem codes ---------- */
+const genCode = () => { const A = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let c = ""; for (let i=0;i<8;i++) c += A[Math.floor(Math.random()*A.length)]; return c; };
+const rcFindUser = ref => { const q = String(ref||"").trim().toLowerCase(); return q ? S.users.find(u=>String(u.code||"").toLowerCase()===q) : null; };
+function rcRes(){
+  const q = String(S.rc.ref||"").trim();
+  if (!q) return `<div style="margin-top:6px;font-size:12px;color:var(--mute)">Type the user's referral code.</div>`;
+  const u = rcFindUser(q);
+  return u ? `<div style="margin-top:6px;font-size:13px;color:#0b7a55">✓ <b>${esc(uName(u)||u.id.slice(0,6))}</b> · balance ${fmt(u.balance||0)} BDT</div>` : `<div style="margin-top:6px;font-size:13px;color:var(--red)">No user found with this referral code.</div>`;
+}
+window.rcSet = (k,v) => { S.rc[k] = v; };
+window.rcRef = v => { S.rc.ref = v; const r = $("#rc_res"); if (r) r.innerHTML = rcRes(); };
+window.rcTarget = v => { S.rc.target = v; render(); };
+function rcRows(){
+  if (!S.rcodes.length) return `<tr><td colspan="7" style="color:var(--mute)">No redeem codes yet.</td></tr>`;
+  return S.rcodes.slice().sort((a,b)=>tms(b.createdAt)-tms(a.createdAt)).map(o=>{
+    const full = o.maxUses>0 && (o.used||0)>=o.maxUses;
+    return `<tr><td><b>${esc(o.code||o.id)}</b></td><td>${fmt(o.amount)}</td><td>${o.target==="all" ? "All users" : esc((o.userName||"user")+" · ref "+(o.userCode||"-"))}</td><td>${o.used||0} / ${o.maxUses>0 ? o.maxUses : "∞"}</td><td><span class="tag ${o.active===false ? "x" : ""}">${o.active===false ? "Off" : "Active"}</span>${full ? ' <span class="tag cr">Full</span>' : ""}</td><td>${esc(fdt(tms(o.createdAt)))}</td><td><button class="sm out" data-rccopy="${esc(o.id)}">Copy</button> <button class="sm out" data-rctoggle="${esc(o.id)}">${o.active===false ? "Enable" : "Disable"}</button> <button class="sm red" data-rcdel="${esc(o.id)}">Delete</button></td></tr>`;
+  }).join("");
+}
+function redeem(){
+  const f = S.rc;
+  return `<h1>Redeem codes</h1><div class="box"><h3 style="margin-bottom:6px">Create redeem code</h3><p style="font-size:13px;color:var(--mute);line-height:1.5">The amount is added to the user's balance when they redeem. Each user can redeem a code only once. <b>All users</b>: anyone with the code can redeem it (set a max if you want a limit). <b>One user</b>: only the user with that referral code can redeem it.</p>
+  <div class="form" style="margin-top:6px">
+  <div><label>Amount (BDT)</label><input id="rc_a" type="number" min="1" step="0.01" placeholder="e.g. 50" value="${esc(f.amount)}" oninput="window.rcSet('amount',this.value)"></div>
+  <div><label>Code (empty = auto create)</label><input id="rc_c" placeholder="e.g. WELCOME50" autocomplete="off" value="${esc(f.code)}" oninput="window.rcSet('code',this.value)"></div>
+  <div><label>Who can redeem</label><select id="rc_t" onchange="window.rcTarget(this.value)"><option value="all" ${f.target==="all"?"selected":""}>All users</option><option value="user" ${f.target==="user"?"selected":""}>One user (referral code)</option></select></div>
+  ${f.target==="user"
+    ? `<div><label>User referral code</label><input id="rc_r" placeholder="Referral code" autocomplete="off" value="${esc(f.ref)}" oninput="window.rcRef(this.value)"><div id="rc_res">${rcRes()}</div></div>`
+    : `<div><label>Max total redeems (optional)</label><input id="rc_m" type="number" min="1" placeholder="empty = no limit" value="${esc(f.max)}" oninput="window.rcSet('max',this.value)"></div>`}
+  <button data-addrc>Create code</button></div></div>
+  <div class="box"><table><thead><tr><th>Code</th><th>Amount</th><th>For</th><th>Used</th><th>Status</th><th>Created</th><th></th></tr></thead><tbody>${rcRows()}</tbody></table></div>`;
+}
+async function createRC(){
+  const f = S.rc, amt = Math.round((Number(f.amount)||0)*100)/100;
+  if (!(amt > 0)) return toast("Enter an amount");
+  let code = String(f.code||"").trim().toUpperCase().replace(/\s+/g,"");
+  if (code) { if (!/^[A-Z0-9_-]{3,24}$/.test(code)) return toast("Code must be 3-24 letters or numbers"); } else code = genCode();
+  const data = { code, amount:amt, target:f.target, active:true, used:0, maxUses:0, createdBy:adminEmail() };
+  if (f.target === "user") {
+    const u = rcFindUser(f.ref); if (!u) return toast("No user found with this referral code");
+    data.userId = u.id; data.userCode = u.code || ""; data.userName = uName(u) || ""; data.maxUses = 1;
+  } else { const mx = Math.floor(Number(f.max)||0); data.maxUses = mx > 0 ? mx : 0; }
+  if (!confirm("Create code "+code+" for "+fmt(amt)+" BDT\\nWho: "+(f.target==="user" ? data.userName+" (ref "+data.userCode+")" : "All users"+(data.maxUses ? " (max "+data.maxUses+")" : ""))+"?")) return;
+  try {
+    if (DEMO) { if (S.rcodes.some(x=>x.id===code)) throw new Error("This code already exists"); S.rcodes.unshift({ id:code, ...data, createdAt:Date.now() }); }
+    else await fb.runTransaction(db, async t => {
+      const r = fb.doc(db,"redeemCodes",code), sn = await t.get(r);
+      if (sn.exists()) throw new Error("This code already exists");
+      t.set(r, { ...data, createdAt:fb.serverTimestamp() });
+    });
+  } catch(e) { console.error(e); return toast(e.message || "Create failed"); }
+  S.rc = { amount:"", code:"", target:"all", ref:"", max:"" };
+  try { await navigator.clipboard.writeText(code); } catch {}
+  render(); toast("Code created: "+code+" (copied)");
+}
+
 function settings(){
   const rows = S.reasons.map(r=>`<tr><td>${esc(r.label)}</td><td>${RT[r.type]||esc(r.type)}</td><td><button class="sm red" data-delreason="${esc(r.id)}">Delete</button></td></tr>`).join("");
   return `<h1>Settings</h1><div class="box" style="max-width:420px"><h3 style="margin-bottom:6px">Rates &amp; rewards</h3><label>USDT exchange (1 USDT = ? BDT)</label><input id="ru" type="number" step="0.01" value="${S.rates.usdt}">
   <label>USDT bonus %</label><input id="rb" type="number" step="0.1" value="${S.rates.bonus}"><button style="margin-top:16px" data-saverates>Save rates</button></div>
   <div class="box" style="max-width:520px"><h3 style="margin-bottom:6px">Balance reasons</h3><p style="font-size:13px;color:var(--mute)">These appear when you add or cut a user's balance, and the user sees them in Balance Details.</p>
   <div class="form" style="margin-top:8px"><div><label>Reason name</label><input id="rn" placeholder="e.g. Bonus"></div><div><label>Used for</label><select id="rt"><option value="credit">Add balance</option><option value="debit">Cut balance</option><option value="both">Add &amp; Cut</option></select></div><button data-addreason>Add reason</button></div>
-  <table style="margin-top:12px"><thead><tr><th>Reason</th><th>Used for</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="3" style="color:var(--mute)">No reasons yet.</td></tr>`}</tbody></table></div>`;
+  <table style="margin-top:12px"><thead><tr><th>Reason</th><th>Used for</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="3" style="color:var(--mute)">No reasons yet.</td></tr>`}</tbody></table></div>
+  <div class="box" style="max-width:720px"><h3 style="margin-bottom:6px">Support links</h3><p style="font-size:13px;color:var(--mute)">These show when a user taps Live Support. Pick Telegram or WhatsApp so the right logo appears, then paste a group, channel or chat link. You can also type a Telegram @username or a WhatsApp number with country code, and it becomes a link automatically.</p>
+  <div class="form" style="margin-top:8px"><div><label>Type</label><select id="sut"><option value="telegram">Telegram</option><option value="whatsapp">WhatsApp</option></select></div><div><label>Name shown to user</label><input id="sun" placeholder="e.g. Support group"></div><div style="grid-column:span 2"><label>Link</label><input id="sul" placeholder="https://t.me/... or https://chat.whatsapp.com/..."></div><button data-addsup>Add link</button></div>
+  <table style="margin-top:12px"><thead><tr><th></th><th>Name</th><th>Link</th><th></th></tr></thead><tbody>${supRows() || `<tr><td colspan="4" style="color:var(--mute)">No support links yet.</td></tr>`}</tbody></table></div>
+  <div class="box" style="max-width:720px"><h3 style="margin-bottom:6px">Tutorial videos</h3><p style="font-size:13px;color:var(--mute)">These show on the user's Home page under Tutorials. Paste a YouTube link (plays inside the app) or a direct .mp4 link. Other links open in a new tab. If the list is empty the Tutorials section is hidden.</p>
+  <div class="form" style="margin-top:8px"><div><label>Title</label><input id="tt" placeholder="e.g. How to buy USDT"></div><div><label>Short note (optional)</label><input id="ts" placeholder="e.g. 2 min video"></div><div style="grid-column:span 2"><label>Video link</label><input id="tl" type="url" placeholder="https://youtu.be/..."></div><button data-addtut>Add video</button></div>
+  <table style="margin-top:12px"><thead><tr><th>#</th><th>Title</th><th>Link</th><th></th></tr></thead><tbody>${tutRows() || `<tr><td colspan="4" style="color:var(--mute)">No tutorial videos yet.</td></tr>`}</tbody></table></div>`;
 }
 
 function render(){
-  const r = $("#root"), ae = document.activeElement, keepId = ae && (ae.id==="oq"||ae.id==="sq"||ae.id==="sf_a"||ae.id==="sf_n"||ae.id==="sf_q") ? ae.id : null, keepOq = keepId ? ae.selectionStart : null;
+  const r = $("#root"), ae = document.activeElement, keepId = ae && (/^(oq|sq|sf_a|sf_n|sf_q|rc_a|rc_c|rc_r|rc_m)$/.test(ae.id)) ? ae.id : null, keepOq = keepId ? ae.selectionStart : null;
   if (!S.admin) { r.innerHTML = login(); return; }
   const n=(k,l)=>`<button class="${S.tab===k?"act":""}" data-tab="${k}">${l}</button>`;
-  r.innerHTML = `<div class="wrap"><aside><h2>Nerivo Admin</h2>${n("dash","Dashboard")}${n("users","Users")}${n("orders","Buy orders")}${n("sells","Sell orders")}${n("settings","Settings")}<button data-logout style="margin-top:18px;background:rgba(255,255,255,.18);color:#fff">Log out</button></aside><main>${({dash,users,orders,sells,settings})[S.tab]()}</main></div>`;
+  r.innerHTML = `<div class="wrap"><aside><h2>Nova Pay Admin</h2>${n("dash","Dashboard")}${n("users","Users")}${n("orders","Buy orders")}${n("sells","Sell orders")}${n("redeem","Redeem codes")}${n("settings","Settings")}<button data-logout style="margin-top:18px;background:rgba(255,255,255,.18);color:#fff">Log out</button></aside><main>${({dash,users,orders,sells,redeem,settings})[S.tab]()}</main></div>`;
   if (keepOq !== null) { const el = $("#"+keepId); if (el) { el.focus(); try { el.setSelectionRange(keepOq,keepOq); } catch {} } }
 }
 
@@ -327,6 +410,9 @@ function subscribe(){
     onSnapshot(collection(db,"users"), s=>{ S.users=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, err("users")),
     onSnapshot(collection(db,"buyOrders"), s=>{ S.orders=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, err("buyOrders")),
     onSnapshot(collection(db,"sellOrders"), s=>{ S.sells=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, err("sellOrders")),
+    onSnapshot(collection(db,"redeemCodes"), s=>{ S.rcodes=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, err("redeemCodes")),
+    onSnapshot(doc(db,"settings","support"), s=>{ if(s.exists() && Array.isArray(s.data().list)) S.sup=s.data().list; if(S.tab!=="settings") render(); }, ()=>{}),
+    onSnapshot(doc(db,"settings","tutorials"), s=>{ if(s.exists() && Array.isArray(s.data().list)) S.tuts=s.data().list; if(S.tab!=="settings") render(); }, ()=>{}),
     onSnapshot(doc(db,"settings","reasons"), s=>{ if(s.exists() && Array.isArray(s.data().list)) S.reasons=s.data().list; if(S.tab!=="settings") render(); }, ()=>{}),
     onSnapshot(doc(db,"settings","wallets"), s=>{ if(s.exists()){ const d=s.data(); S.wl={bkash:d.bkash||[],nagad:d.nagad||[]}; } if(S.tab!=="orders") render(); }, ()=>{}),
     onSnapshot(doc(db,"settings","rates"), s=>{ if(s.exists()) S.rates=s.data(); if(S.tab!=="settings") render(); }, err("settings/rates"))
@@ -466,7 +552,7 @@ async function setSellStatus(id, ns){
   const o = S.sells.find(x=>x.id===id); if (!o) return;
   if (o.status === ns) return toast("Already "+SL[ns]);
   if (o.status==="success" || o.status==="failed") return toast("This request is already final");
-  const msg = ns==="success" ? "Mark SUCCESS? Make sure you have sent "+fmt(o.amount)+" BDT to "+o.number+" ("+payName(o.method)+")."
+  const msg = ns==="success" ? "Mark SUCCESS? Make sure you have sent "+fmt(o.amount)+" BDT to "+o.number+" ("+payName(o.method)+"). It will also be added to the user's Sale amount and Sale orders on their Home page."
     : ns==="failed" ? "Mark FAILED? "+fmt(o.amount)+" BDT will be refunded to the user's balance (only once)."
     : ns==="lock" ? "Lock this request? The balance stays cut and nothing is refunded."
     : "Move this request back to Processing?";
@@ -475,6 +561,7 @@ async function setSellStatus(id, ns){
   try {
     if (DEMO) {
       if (ns==="failed") { const u = S.users.find(x=>x.id===o.userId); if (u) u.balance = Number(u.balance||0)+Number(o.amount||0); o.refunded = true; }
+      if (ns==="success") { const u = S.users.find(x=>x.id===o.userId); if (u) { u.saleAmount = Number(u.saleAmount||0)+Number(o.amount||0); u.saleOrders = Number(u.saleOrders||0)+1; } }
       o.status = ns; o.history = [...(o.history||[]), entry]; render(); return toast("Status: "+SL[ns]);
     }
     const sRef = fb.doc(db,"sellOrders",id);
@@ -487,6 +574,16 @@ async function setSellStatus(id, ns){
         t.update(sRef, { status:"failed", refunded:true, reviewedAt:fb.serverTimestamp(), history:fb.arrayUnion(entry) });
         t.update(uRef, { balance:nb });
         t.set(fb.doc(fb.collection(db,"users",sd.userId,"ledger")), { kind:"withdraw_refund", direction:"credit", amount:Number(sd.amount||0), orderId:id, balanceAfter:nb, createdAt:fb.serverTimestamp() });
+      });
+    } else if (ns==="success") {
+      // success: mark the request and add it to the user's Sale amount / Sale orders (shown on their Home page)
+      await fb.runTransaction(db, async t => {
+        const ss = await t.get(sRef); if (!ss.exists()) throw new Error("Request not found");
+        const sd = ss.data(); if (sd.status==="success" || sd.status==="failed") throw new Error("Request is already final");
+        const uRef = fb.doc(db,"users",sd.userId), us = await t.get(uRef); if (!us.exists()) throw new Error("User not found");
+        const ud = us.data();
+        t.update(sRef, { status:"success", reviewedAt:fb.serverTimestamp(), history:fb.arrayUnion(entry) });
+        t.update(uRef, { saleAmount:Math.round((Number(ud.saleAmount||0)+Number(sd.amount||0))*100)/100, saleOrders:Number(ud.saleOrders||0)+1 });
       });
     } else {
       await fb.updateDoc(sRef, { status:ns, reviewedAt:fb.serverTimestamp(), history:fb.arrayUnion(entry) });
@@ -634,13 +731,15 @@ async function userHistory(id){
     if (DEMO) rows = u._ledger || [];
     else { const q = await fb.getDocs(fb.query(fb.collection(db,"users",id,"ledger"), fb.orderBy("createdAt","desc"), fb.limit(100))); rows = q.docs.map(d=>({ id:d.id, ...d.data() })); }
   } catch(e) { $("#uh_b").textContent = "Could not load: "+(e.code||e.message); return; }
-  const lab = l => l.kind==="withdraw" ? "Sell / Withdraw" : l.kind==="withdraw_refund" ? "Withdraw refund" : l.kind==="adjust" ? (l.reason||"Balance adjustment") : l.kind==="reward" ? "Task reward" : "Order amount";
+  const lab = l => l.kind==="redeem" ? "Redeem code ("+(l.code||"")+")" : l.kind==="withdraw" ? "Sell / Withdraw" : l.kind==="withdraw_refund" ? "Withdraw refund" : l.kind==="adjust" ? (l.reason||"Balance adjustment") : l.kind==="reward" ? "Task reward" : "Order amount";
   const row = l => { const deb = (l.kind==="adjust" && l.direction==="debit") || l.kind==="withdraw"; return `<div style="padding:9px 0;border-bottom:1px solid var(--line);font-size:14px;display:flex;gap:10px"><div style="flex:1"><b>${esc(lab(l))}</b>${l.note ? `<div>${esc(l.note)}</div>` : ""}<div style="color:var(--mute);font-size:12px">${esc(fdt(tms(l.createdAt)))}${l.by ? " · by "+esc(l.by) : ""}${l.balanceAfter!=null ? " · balance after "+fmt(l.balanceAfter) : ""}</div></div><b style="color:${deb?"var(--red)":"var(--g)"}">${deb?"−":"+"}${fmt(l.amount)}</b></div>`; };
   const log = (u.statusLog||[]).slice().sort((a,b)=>b.at-a.at).map(e=>`<div style="padding:7px 0;border-bottom:1px solid var(--line);font-size:13px"><span class="tag ${ACC_TC[e.status]||""}">${esc(ACC[e.status]||e.status)}</span> ${esc(e.note||"")}<div style="color:var(--mute);font-size:12px">${esc(fdt(e.at))} · ${esc(e.by||"")}</div></div>`).join("");
   $("#uh_b").style.color = "inherit";
   $("#uh_b").innerHTML = `<h3 style="font-size:15px;margin-bottom:4px">Balance history</h3>${rows.length ? rows.map(row).join("") : `<div style="color:var(--mute)">No records yet.</div>`}${log ? `<h3 style="font-size:15px;margin:16px 0 4px">Account status log</h3>${log}` : ""}`;
 }
 
+async function saveSup(){ if (!DEMO) await fb.setDoc(fb.doc(db,"settings","support"), { list:S.sup }); }
+async function saveTuts(){ if (!DEMO) await fb.setDoc(fb.doc(db,"settings","tutorials"), { list:S.tuts }); }
 async function saveReasons(){ if (!DEMO) await fb.setDoc(fb.doc(db,"settings","reasons"), { list:S.reasons }); }
 
 document.addEventListener("click", async e=>{
@@ -673,6 +772,51 @@ document.addEventListener("click", async e=>{
     if (S.reasons.some(r=>r.label.toLowerCase()===label.toLowerCase())) return toast("This reason already exists");
     const prev = S.reasons.slice(); S.reasons.push({ id:"r_"+Date.now().toString(36), label, type });
     try { await saveReasons(); render(); toast("Reason added"); } catch(e) { S.reasons = prev; render(); toast("Failed: "+(e.code||e.message)); }
+  }
+  else if ("addrc" in d) createRC();
+  else if ("rccopy" in d) { try { await navigator.clipboard.writeText(d.rccopy); toast("Copied: "+d.rccopy); } catch { toast(d.rccopy); } }
+  else if ("rctoggle" in d) {
+    const o = S.rcodes.find(x=>x.id===d.rctoggle); if (!o) return;
+    const on = o.active === false;
+    try { if (DEMO) o.active = on; else await fb.updateDoc(fb.doc(db,"redeemCodes",o.id), { active:on }); render(); toast(on ? "Code enabled" : "Code disabled"); } catch(e) { toast("Failed: "+(e.code||e.message)); }
+  }
+  else if ("rcdel" in d) {
+    if (!confirm("Delete code "+d.rcdel+"? Users who already redeemed it keep their balance and history.")) return;
+    try { if (DEMO) S.rcodes = S.rcodes.filter(x=>x.id!==d.rcdel); else await fb.deleteDoc(fb.doc(db,"redeemCodes",d.rcdel)); render(); toast("Deleted"); } catch(e) { toast("Failed: "+(e.code||e.message)); }
+  }
+  else if ("addsup" in d) {
+    const type = $("#sut").value, label = $("#sun").value.trim(), url = supUrl(type, $("#sul").value);
+    if (!label) return toast("Enter a name");
+    if (!url) return toast(type==="telegram" ? "Enter a https:// link or a Telegram @username" : "Enter a https:// link or a WhatsApp number with country code");
+    const prev = S.sup.slice(); S.sup.push({ id:"s_"+Date.now().toString(36), type, label, url });
+    try { await saveSup(); render(); toast("Link added"); } catch(e) { S.sup = prev; render(); toast("Failed: "+(e.code||e.message)); }
+  }
+  else if ("delsup" in d) {
+    if (!confirm("Delete this support link?")) return;
+    const prev = S.sup.slice(); S.sup = S.sup.filter(x=>x.id!==d.delsup);
+    try { await saveSup(); render(); toast("Deleted"); } catch(e) { S.sup = prev; render(); toast("Failed: "+(e.code||e.message)); }
+  }
+  else if ("upsup" in d) {
+    const i = S.sup.findIndex(x=>x.id===d.upsup); if (i < 1) return;
+    const prev = S.sup.slice(); [S.sup[i-1], S.sup[i]] = [S.sup[i], S.sup[i-1]];
+    try { await saveSup(); render(); } catch(e) { S.sup = prev; render(); toast("Failed: "+(e.code||e.message)); }
+  }
+  else if ("addtut" in d) {
+    const title = $("#tt").value.trim(), sub = $("#ts").value.trim(), url = $("#tl").value.trim();
+    if (!title) return toast("Enter a title");
+    if (!/^https?:\/\/\S+$/i.test(url)) return toast("Enter a full video link starting with https://");
+    const prev = S.tuts.slice(); S.tuts.push({ id:"t_"+Date.now().toString(36), title, sub, url });
+    try { await saveTuts(); render(); toast("Video added"); } catch(e) { S.tuts = prev; render(); toast("Failed: "+(e.code||e.message)); }
+  }
+  else if ("deltut" in d) {
+    if (!confirm("Delete this tutorial video?")) return;
+    const prev = S.tuts.slice(); S.tuts = S.tuts.filter(t=>t.id!==d.deltut);
+    try { await saveTuts(); render(); toast("Deleted"); } catch(e) { S.tuts = prev; render(); toast("Failed: "+(e.code||e.message)); }
+  }
+  else if ("uptut" in d) {
+    const i = S.tuts.findIndex(t=>t.id===d.uptut); if (i < 1) return;
+    const prev = S.tuts.slice(); [S.tuts[i-1], S.tuts[i]] = [S.tuts[i], S.tuts[i-1]];
+    try { await saveTuts(); render(); } catch(e) { S.tuts = prev; render(); toast("Failed: "+(e.code||e.message)); }
   }
   else if ("delreason" in d) {
     if (!confirm("Delete this reason? Old history keeps its text.")) return;
