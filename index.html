@@ -64,7 +64,7 @@ if (!DEMO) try {
   const V = "https://www.gstatic.com/firebasejs/10.12.2/";
   const [a, f, ap] = await Promise.all([import(V+"firebase-auth.js"), import(V+"firebase-firestore.js"), import(V+"firebase-app.js")]);
   fb = { ...a, ...f };
-  const app = ap.initializeApp(firebaseConfig);
+  const app = ap.initializeApp(firebaseConfig, "nerivo-admin");   /* separate app name = separate login session from the user panel */
   auth = a.initializeAuth(app, { persistence: [a.indexedDBLocalPersistence, a.browserLocalPersistence, a.inMemoryPersistence] }); db = f.initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
 } catch(e) { showErr("Firebase could not load: "+e.message+" (check internet or VPN)"); throw e; }
 
@@ -89,8 +89,8 @@ loadW();
 window.pickNum = (id,v) => { if (v) { const el = $("#"+id); if (el) el.value = v; } };
 const fdt = ms => ms ? new Date(ms).toLocaleString() : "-";
 /* Account status + balance reasons */
-const ACC = { active:"Active", banned:"Banned", suspended:"Suspended", frozen:"Frozen", locked:"Locked" };
-const ACC_TC = { banned:"x", suspended:"cr", frozen:"fz", locked:"lk" };
+const ACC = { active:"Active", banned:"Banned", suspended:"Suspended", frozen:"Frozen", locked:"Locked", deleted:"Deleted" };
+const ACC_TC = { deleted:"x", banned:"x", suspended:"cr", frozen:"fz", locked:"lk" };
 const uName = u => u.phone || (u.email||"").replace(/@nerivo\.local$/,"");
 const uStatus = u => u.accountStatus || (u.disabled ? "banned" : "active");
 const DEFAULT_REASONS = [ { id:"system_credit", label:"System Credit", type:"credit" }, { id:"withdraw", label:"Withdraw", type:"debit" }, { id:"system_debit", label:"System Debit", type:"debit" } ];
@@ -113,18 +113,22 @@ function login(){
 }
 
 function dash(){
-  const sum = k => S.users.reduce((a,u)=>a+Number(u[k]||0),0);
+  const live = S.users.filter(u=>uStatus(u)!=="deleted");
+  const sum = k => live.reduce((a,u)=>a+Number(u[k]||0),0);
   const n = k => S.orders.filter(o=>NS(o.status)===k).length;
   const c = (t,v)=>`<div class="card"><small>${t}</small><b>${v}</b></div>`;
-  return `<h1>Dashboard</h1><div class="cards">${c("Users",S.users.length)}${c("Total user balance",fmt(sum("balance"))+" BDT")}${c("Total income paid",fmt(sum("income"))+" BDT")}${c("Sale amount",fmt(sum("saleAmount"))+" BDT")}${c("Open orders",n("open"))}${c("Order Create",n("created"))}${c("Success",n("success"))}${c("Failed",n("failed"))}${c("Lock",n("lock"))}</div>`;
+  return `<h1>Dashboard</h1><div class="cards">${c("Users",live.length)}${c("Total user balance",fmt(sum("balance"))+" BDT")}${c("Total income paid",fmt(sum("income"))+" BDT")}${c("Sale amount",fmt(sum("saleAmount"))+" BDT")}${c("Open orders",n("open"))}${c("Order Create",n("created"))}${c("Success",n("success"))}${c("Failed",n("failed"))}${c("Lock",n("lock"))}</div>`;
 }
 
 function users(){
   return `<h1>Users</h1><div class="box"><input id="q" placeholder="Search by phone, email or code" style="max-width:320px;margin-bottom:12px" oninput="window.filterUsers(this.value)">
-  <table><thead><tr><th>Phone</th><th>Code</th><th>Referred by</th><th>Last IP</th><th>Balance</th><th>Income</th><th>Status</th><th></th></tr></thead><tbody id="ub">${userRows(S.users)}</tbody></table></div>`;
+  <label style="display:flex;align-items:center;gap:8px;font-size:14px;margin-bottom:12px"><input type="checkbox" style="width:auto" ${S.showDel?"checked":""} onchange="window.toggleDel(this.checked)"> Show deleted accounts</label>
+  <table><thead><tr><th>Phone</th><th>Code</th><th>Referred by</th><th>Last IP</th><th>Balance</th><th>Income</th><th>Status</th><th></th></tr></thead><tbody id="ub">${userRows(visU())}</tbody></table></div>`;
 }
 const userRows = list => list.length ? list.map(u=>{ const refCode = u.referredBy ? (S.users.find(x=>x.id===u.referredBy)?.code || u.referredBy.slice(0,6)+"...") : "-"; return `<tr><td>${esc(uName(u))}</td><td>${esc(u.code)}</td><td>${esc(refCode)}</td><td>${esc(u.lastIp||"-")}</td><td>${fmt(u.balance)}</td><td>${fmt(u.income)}</td><td><span class="tag ${ACC_TC[uStatus(u)]||""}">${ACC[uStatus(u)]}</span></td><td style="white-space:nowrap"><button class="sm out" data-edit="${u.id}">Edit</button> <button class="sm" data-bal="${u.id}">Balance</button> <button class="sm out" data-acct="${u.id}">Account</button> <button class="sm out" data-uhist="${u.id}">History</button></td></tr>`; }).join("") : `<tr><td colspan="8" style="color:var(--mute)">No users found.</td></tr>`;
-window.filterUsers = v => { v=v.toLowerCase(); $("#ub").innerHTML = userRows(S.users.filter(u=>[u.phone,u.email,u.code,u.lastIp].join(" ").toLowerCase().includes(v))); };
+const visU = () => S.users.filter(u => S.showDel || uStatus(u) !== "deleted");
+window.toggleDel = v => { S.showDel = v; render(); };
+window.filterUsers = v => { v=v.toLowerCase(); $("#ub").innerHTML = userRows(visU().filter(u=>[u.phone,u.email,u.code,u.lastIp].join(" ").toLowerCase().includes(v))); };
 
 const lastNum = k => { try { return localStorage.getItem("nerivo_"+k) || ""; } catch { return ""; } };
 
@@ -280,9 +284,9 @@ async function creditSuccess(id, entry){
     if (!us.exists()) throw new Error("User profile not found");
     const upd = { status:"success", reviewedAt:fb.serverTimestamp(), history:fb.arrayUnion(entry) };
     if (od.credited) { t.update(oRef, upd); return; }          /* balance was already added once, never add twice */
-    const u = us.data(), fresh = u.statsDate !== day, reward = od.amount * od.rate / 100;
+    const u = us.data(), fresh = u.statsDate !== day, reward = Math.round(od.amount * od.rate) / 100;
     t.update(oRef, { ...upd, credited:true });
-    t.update(uRef, { balance:(u.balance||0)+od.amount, income:(fresh?0:(u.income||0))+reward, purchaseAmount:(fresh?0:(u.purchaseAmount||0))+od.amount, purchaseOrders:(fresh?0:(u.purchaseOrders||0))+1, statsDate:day });
+    t.update(uRef, { balance:Math.round(((u.balance||0)+od.amount+reward)*100)/100, income:(fresh?0:(u.income||0))+reward, purchaseAmount:(fresh?0:(u.purchaseAmount||0))+od.amount, purchaseOrders:(fresh?0:(u.purchaseOrders||0))+1, statsDate:day });
     const L = fb.collection(db,"users",od.claimedBy,"ledger");
     t.set(fb.doc(L,id+"_buy"), { kind:"purchase", amount:od.amount, orderId:id, createdAt:fb.serverTimestamp() });
     t.set(fb.doc(L,id+"_reward"), { kind:"reward", amount:reward, orderId:id, createdAt:fb.serverTimestamp() });
@@ -295,7 +299,7 @@ async function setStatus(id, ns){
   if (cur === ns) return toast("Already "+LBL[ns]);
   if (ns === "success" && !claimed) return toast("No user has claimed this order");
   if (ns === "open" && cur === "success") return toast("A successful order cannot be released");
-  const msg = ns === "success" ? "Mark SUCCESS? This adds "+fmt(o.amount)+" BDT balance and the reward to the user (only once)."
+  const msg = ns === "success" ? "Mark SUCCESS? This adds "+fmt(o.amount)+" BDT + "+fmt(Math.round(o.amount*o.rate)/100)+" BDT reward to the user's balance (only once)."
     : ns === "open" ? "Release this order back to the pool? The user's claim will be removed."
     : "Change status to "+LBL[ns]+"?"+(cur === "success" ? " The balance already added to the user stays (adjust it in Users if needed)." : "");
   if (!confirm(msg)) { render(); return; }
@@ -337,13 +341,15 @@ function showHistory(id){
 function accountModal(id){
   const u = S.users.find(x=>x.id===id); if (!u) return;
   const cur = uStatus(u);
-  const opts = Object.keys(ACC).map(k=>`<option value="${k}" ${k===cur?"selected":""}>${k==="active" ? "Active (unban / unfreeze / unlock / unsuspend)" : ACC[k]}</option>`).join("");
+  const opts = Object.keys(ACC).filter(k=>k!=="deleted").map(k=>`<option value="${k}" ${k===cur?"selected":""}>${k==="active" ? (cur==="deleted" ? "Active (restore deleted account)" : "Active (unban / unfreeze / unlock / unsuspend)") : ACC[k]}</option>`).join("");
   const m = modal(`<h2>${esc(uName(u))}</h2><div style="margin-top:8px">Current status: <span class="tag ${ACC_TC[cur]||""}">${ACC[cur]}</span></div>
   <label>Set account status</label><select id="as_st">${opts}</select>
   <label>Message shown to the user (optional)</label><input id="as_note" value="${esc(u.accountNote||"")}" placeholder="e.g. Suspicious activity">
   <div style="font-size:12px;color:var(--mute);margin-top:10px;line-height:1.6">Banned / Suspended: the user cannot use the app.<br>Frozen / Locked: the user can log in and see data, but cannot take new orders.</div>
-  <div style="display:flex;gap:10px;margin-top:18px"><button id="as_sv">Save</button><button class="out" id="as_cn">Cancel</button></div>`);
+  <div style="display:flex;gap:10px;margin-top:18px"><button id="as_sv">Save</button><button class="out" id="as_cn">Cancel</button></div>
+  ${cur!=="deleted" ? `<button id="as_del" style="margin-top:22px;width:100%;background:var(--red);color:#fff">Delete this account</button><div style="font-size:12px;color:var(--mute);margin-top:6px;line-height:1.6">The user is signed out and can never log in again. Orders they claimed but did not pay for go back to the pool.</div>` : ""}`);
   $("#as_cn").onclick = () => m.remove();
+  if ($("#as_del")) $("#as_del").onclick = () => deleteUser(id, m);
   $("#as_sv").onclick = async () => {
     const ns = $("#as_st").value, note = $("#as_note").value.trim();
     if (ns === cur && note === (u.accountNote||"")) return toast("No change");
@@ -355,6 +361,27 @@ function accountModal(id){
       m.remove(); render(); toast("Status: "+ACC[ns]);
     } catch(e) { toast("Failed: "+(e.code||e.message)); }
   };
+}
+
+/* ---------- Delete user ---------- */
+async function deleteUser(id, m){
+  const u = S.users.find(x=>x.id===id); if (!u) return;
+  const label = uName(u);
+  if (!confirm("Delete account "+label+"?\n\nThe user will be signed out and cannot log in again. Their balance ("+fmt(u.balance)+" BDT) stays in the record.")) return;
+  if ((prompt("Type DELETE to confirm") || "").trim().toUpperCase() !== "DELETE") return toast("Cancelled");
+  const entry = { status:"deleted", by:adminEmail(), at:Date.now(), note:"Account deleted by admin" };
+  const free = S.orders.filter(o => o.claimedBy === id && NS(o.status) === "created" && !o.trxId);
+  const oEntry = { status:"open", by:"admin", admin:adminEmail(), at:Date.now(), note:"Released: user account deleted" };
+  try {
+    if (DEMO) { Object.assign(u, { accountStatus:"deleted", disabled:true, statusLog:[...(u.statusLog||[]),entry] }); free.forEach(o=>{ o.status="open"; o.claimedBy=null; o.payMethod=null; }); }
+    else {
+      const b = fb.writeBatch(db);
+      b.update(fb.doc(db,"users",id), { accountStatus:"deleted", disabled:true, accountNote:"", deletedAt:fb.serverTimestamp(), statusAt:fb.serverTimestamp(), statusLog:fb.arrayUnion(entry) });
+      free.forEach(o => b.update(fb.doc(db,"buyOrders",o.id), { status:"open", claimedBy:null, claimedAt:null, payMethod:null, senderNumber:null, trxId:null, history:fb.arrayUnion(oEntry) }));
+      await b.commit();
+    }
+    m.remove(); render(); toast("Account deleted");
+  } catch(e) { console.error(e); toast("Delete failed: "+(e.code||e.message)); }
 }
 
 /* ---------- Balance add / cut ---------- */
