@@ -71,7 +71,7 @@ if (!DEMO) try {
 const $ = s => document.querySelector(s);
 const fmt = n => Number(n || 0).toFixed(2);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const S = { admin:false, tab:"dash", users:[], orders:[], rates:{usdt:130.34,bonus:3}, err:"", of:"all", oq:"", wl:{bkash:[],nagad:[]}, sells:[], sf:"all", sq:"", sellForm:{u:"",a:"",m:"bkash",n:""}, swl:null };
+const S = { admin:false, tab:"dash", users:[], orders:[], rates:{usdt:130.34,bonus:3}, err:"", of:"all", oq:"", wl:{bkash:[],nagad:[]}, sells:[], sf:"all", sq:"", sellForm:{u:"",a:"",m:"bkash",n:"",q:""}, swl:null };
 let unsubs = [];
 /* Order status: open -> created (user claimed + picked wallet) -> success / failed / lock (admin decides). Old names are mapped. */
 const NS = s => ({reserved:"created",done:"success",claimed:"success",rejected:"failed"})[s] || s;
@@ -206,6 +206,23 @@ function sellRows(){
   }).join("");
 }
 window.sfSet = (k,v) => { S.sellForm[k] = v; };
+function sfResults(){
+  const f = S.sellForm, sel = f.u && S.users.find(x=>x.id===f.u);
+  if (sel) return `<div style="margin-top:8px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font-size:14px;line-height:1.6"><b>${esc(uName(sel)||sel.id.slice(0,6))}</b> · ref ${esc(sel.code||"-")}<br>Current balance: <b>${fmt(sel.balance||0)} BDT</b> <button class="sm out" data-sfclear style="margin-left:6px">Change</button></div>`;
+  const q = String(f.q||"").trim().toLowerCase();
+  if (!q) return `<div style="margin-top:8px;font-size:12px;color:var(--mute)">Type the user's referral code to find them.</div>`;
+  const hits = S.users.filter(u => String(u.code||"").toLowerCase().includes(q) || String(uName(u)||"").toLowerCase().includes(q))
+    .sort((a,b)=>(String(b.code||"").toLowerCase()===q)-(String(a.code||"").toLowerCase()===q)).slice(0,6);
+  if (!hits.length) return `<div style="margin-top:8px;font-size:12px;color:var(--mute)">No user found for "${esc(f.q)}".</div>`;
+  return `<div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">${hits.map(u=>`<button class="sm out" style="text-align:left" data-sfpick="${esc(u.id)}">${esc(uName(u)||u.id.slice(0,6))} · ref ${esc(u.code||"-")} · ${fmt(u.balance||0)} BDT</button>`).join("")}</div>`;
+}
+window.sfSearch = v => {
+  S.sellForm.q = v;
+  if (S.sellForm.u) { S.sellForm.u = ""; S.sellForm.n = ""; S.swl = null; render(); return; }
+  const q = v.trim().toLowerCase(), exact = q ? S.users.filter(u=>String(u.code||"").toLowerCase()===q) : [];
+  if (exact.length === 1) { window.sfUser(exact[0].id); return; }
+  const r = $("#sf_res"); if (r) r.innerHTML = sfResults();
+};
 window.sfUser = v => { S.sellForm.u = v; S.sellForm.n = ""; loadSellWallets(v); };
 async function loadSellWallets(uid){
   if (!uid) { S.swl = null; render(); return; }
@@ -236,10 +253,8 @@ function sells(){
         : `<div style="margin-top:8px;font-size:12px;color:var(--mute)">This user has no online wallet${off.length ? " (offline: "+off.map(w=>payName(w.type)+" "+esc(w.number)).join(", ")+")" : ""}. Enter the number manually.</div>`;
     }
   }
-  const us = S.users.slice().sort((a,b)=>String(uName(a)||"").localeCompare(String(uName(b)||"")));
-  const uopts = us.map(u=>`<option value="${esc(u.id)}" ${f.u===u.id?"selected":""}>${esc((uName(u)||u.id.slice(0,6))+" · ref "+(u.code||"-")+" · "+fmt(u.balance||0)+" BDT")}</option>`).join("");
   return `<h1>Sell orders (Withdraw)</h1><div class="box"><h3 style="margin-bottom:10px">Create sell order</h3><div class="form">
-  <div><label>User</label><select id="sf_u" onchange="window.sfUser(this.value)"><option value="">Choose user...</option>${uopts}</select></div>
+  <div><label>User (search by referral code)</label><input id="sf_q" placeholder="Type referral code..." autocomplete="off" value="${esc(f.q||"")}" oninput="window.sfSearch(this.value)"><div id="sf_res">${sfResults()}</div></div>
   <div><label>Amount (BDT)</label><input id="sf_a" type="number" min="100" placeholder="100 or more" value="${esc(f.a)}" oninput="window.sfSet('a',this.value)"></div>
   <div><label>Send money via</label><select id="sf_m" onchange="window.sfSet('m',this.value)"><option value="bkash" ${f.m==="bkash"?"selected":""}>bKash</option><option value="nagad" ${f.m==="nagad"?"selected":""}>Nagad</option></select></div>
   <div><label>Receive number (user's wallet)</label><input id="sf_n" type="tel" placeholder="01XXXXXXXXX" value="${esc(f.n)}" oninput="window.sfSet('n',this.value)">${hint}</div>
@@ -260,7 +275,7 @@ function settings(){
 }
 
 function render(){
-  const r = $("#root"), ae = document.activeElement, keepId = ae && (ae.id==="oq"||ae.id==="sq"||ae.id==="sf_a"||ae.id==="sf_n") ? ae.id : null, keepOq = keepId ? ae.selectionStart : null;
+  const r = $("#root"), ae = document.activeElement, keepId = ae && (ae.id==="oq"||ae.id==="sq"||ae.id==="sf_a"||ae.id==="sf_n"||ae.id==="sf_q") ? ae.id : null, keepOq = keepId ? ae.selectionStart : null;
   if (!S.admin) { r.innerHTML = login(); return; }
   const n=(k,l)=>`<button class="${S.tab===k?"act":""}" data-tab="${k}">${l}</button>`;
   r.innerHTML = `<div class="wrap"><aside><h2>Nerivo Admin</h2>${n("dash","Dashboard")}${n("users","Users")}${n("orders","Buy orders")}${n("sells","Sell orders")}${n("settings","Settings")}<button data-logout style="margin-top:18px">Log out</button></aside><main>${({dash,users,orders,sells,settings})[S.tab]()}</main></div>`;
@@ -407,7 +422,7 @@ async function createSell(){
       });
     }
   } catch(e) { console.error(e); return toast(e.message || "Create sell order failed"); }
-  S.sellForm = { u:"", a:"", m:"bkash", n:"" }; S.swl = null; render(); toast("Sell order created. Balance cut.");
+  S.sellForm = { u:"", a:"", m:"bkash", n:"", q:"" }; S.swl = null; render(); toast("Sell order created. Balance cut.");
 }
 
 async function setSellStatus(id, ns){
@@ -606,6 +621,8 @@ document.addEventListener("click", async e=>{
   else if ("hist" in d) showHistory(d.hist);
   else if ("shist" in d) showSellHistory(d.shist);
   else if ("addsell" in d) createSell();
+  else if ("sfpick" in d) window.sfUser(d.sfpick);
+  else if ("sfclear" in d) { S.sellForm.u = ""; S.sellForm.n = ""; S.sellForm.q = ""; S.swl = null; render(); }
   else if ("swpick" in d) { const on = ((S.swl && S.swl.list) || []).filter(w=>w.online===true), w = on[Number(d.swpick)]; if (w) { S.sellForm.m = w.type; S.sellForm.n = w.number; render(); } }
   else if ("sapply" in d) { const sel = $("#ss_"+d.sapply); if (sel) setSellStatus(d.sapply, sel.value); }
   else if ("sofilter" in d) { S.sf = d.sofilter; render(); }
