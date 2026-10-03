@@ -3,37 +3,51 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1d93f2">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Sora:wght@600;700;800&display=swap" rel="stylesheet">
 <title>Nerivo Admin</title>
 <style>
-:root{--g:#0b7a55;--gd:#0a3d2e;--mint:#e6f4ec;--line:#d9e2de;--mute:#7d8b86;--ink:#10231d;--red:#c0392b}
+:root{--g:#1383e6;--gd:#0a2f55;--sky:#38b6ff;--mint:#eaf6ff;--mint2:#d5ebff;--line:#d3e5f4;--mute:#6a8399;--ink:#0c2238;--red:#c0392b;--shadow:0 10px 24px -12px rgba(19,131,230,.35);--display:"Sora","Segoe UI",system-ui,sans-serif;--body:"Figtree","Segoe UI",Roboto,system-ui,sans-serif}
 *{box-sizing:border-box;margin:0}
-body{font-family:"Segoe UI",Roboto,system-ui,sans-serif;background:#f3f6f4;color:var(--ink)}
-button{font:inherit;cursor:pointer;border:0;border-radius:10px;padding:9px 16px;background:var(--g);color:#fff}
-button.out{background:#fff;color:var(--g);border:1px solid var(--g)}button.red{background:var(--red)}button.sm{padding:6px 12px;font-size:13px}
-input,select{font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;width:100%}
-label{display:block;font-size:13px;color:var(--mute);margin-top:12px}
+body{font-family:var(--body);font-size:14px;line-height:1.4;background:radial-gradient(900px 380px at 60% -90px,#cfe9ff,#eef7ff 55%,#f7fbff);color:var(--ink)}
+button{font:inherit;font-weight:600;cursor:pointer;border:0;border-radius:11px;padding:8px 14px;background:linear-gradient(160deg,#42b9ff,#1383e6);color:#fff;box-shadow:0 8px 14px -9px rgba(19,131,230,.9);transition:filter .15s}
+button:hover{filter:brightness(1.05)}
+button.out{background:#fff;color:var(--g);border:1.5px solid var(--sky);box-shadow:none}button.red{background:var(--red);box-shadow:none}button.sm{padding:5px 11px;font-size:12.5px;border-radius:9px}
+input,select{font:inherit;padding:9px 11px;border:1.5px solid var(--line);border-radius:11px;background:#fff;width:100%;color:var(--ink);transition:border-color .15s,box-shadow .15s}
+input:focus,select:focus{outline:0;border-color:var(--sky);box-shadow:0 0 0 3px rgba(56,182,255,.2)}
+label{display:block;font-size:12px;font-weight:600;color:var(--mute);margin-top:10px;margin-bottom:3px}
 .wrap{display:flex;min-height:100vh}
-aside{width:210px;background:var(--gd);color:#fff;padding:22px 12px;flex:none}
-aside h2{padding:0 10px 18px;font-size:20px}
-aside button{display:block;width:100%;text-align:left;background:none;border-radius:10px;padding:12px;margin-bottom:4px;color:#cfe6dc}
-aside button.act{background:#ffffff22;color:#fff;font-weight:700}
-main{flex:1;padding:24px;min-width:0}
-h1{font-size:24px;margin-bottom:18px}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px}
-.card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px}
-.card small{color:var(--mute)}.card b{display:block;font-size:26px;margin-top:6px}
-.box{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px;margin-top:16px;overflow-x:auto}
-table{width:100%;border-collapse:collapse;font-size:14px}
-th,td{text-align:left;padding:11px 10px;border-bottom:1px solid var(--line);white-space:nowrap}th{color:var(--mute);font-weight:600}
-.tag{padding:3px 10px;border-radius:12px;font-size:12px;background:var(--mint);color:var(--gd)}.tag.x{background:#fde8e6;color:var(--red)}.tag.cr{background:#fff3d6;color:#8a5a00}.tag.lk{background:#ece6f7;color:#5a3d99}.tag.fz{background:#dcefff;color:#0b5394}
-.form{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;align-items:end}
-.login{max-width:360px;margin:12vh auto;background:#fff;padding:28px;border-radius:20px;border:1px solid var(--line)}
-.err{color:var(--red);font-size:14px;margin-top:10px;min-height:18px}
-.modal{position:fixed;inset:0;background:#0006;display:grid;place-items:center;padding:16px;z-index:5}
-.sheet{background:#fff;border-radius:20px;padding:22px;width:100%;max-width:420px;max-height:90vh;overflow:auto}
-.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--gd);color:#fff;padding:12px 20px;border-radius:24px;z-index:9}
-@media(max-width:700px){.wrap{flex-direction:column}aside{width:100%;display:flex;flex-wrap:wrap;gap:4px;padding:12px}aside h2{width:100%;padding:0 6px 6px}aside button{width:auto;margin:0}main{padding:16px}}
-:focus-visible{outline:3px solid #00a99d;outline-offset:2px}
+aside{position:sticky;top:0;align-self:flex-start;height:100vh;width:190px;color:#fff;padding:18px 11px;flex:none;overflow:hidden;background:linear-gradient(170deg,#4cc0ff 0,#1d93f2 50%,#0f6fd0 100%)}
+aside::before{content:"";position:absolute;width:190px;height:190px;border-radius:50%;background:rgba(255,255,255,.12);right:-70px;top:-60px;pointer-events:none}
+aside>*{position:relative}
+aside h2{font-family:var(--display);padding:2px 9px 16px;font-size:17px;font-weight:700;letter-spacing:-.01em}
+aside button{display:block;width:100%;text-align:left;background:none;box-shadow:none;border-radius:11px;padding:10px 12px;margin-bottom:4px;color:#e3f3ff;font-weight:600}
+aside button:hover{background:rgba(255,255,255,.14);filter:none}
+aside button.act{background:#fff;color:var(--g);font-weight:700;box-shadow:0 8px 14px -9px rgba(10,47,85,.6)}
+main{flex:1;padding:20px;min-width:0}
+h1{font-family:var(--display);font-size:20px;font-weight:700;letter-spacing:-.02em;color:var(--gd);margin-bottom:14px}
+h3{font-family:var(--display);font-size:15px;font-weight:700;color:var(--gd)}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:11px}
+.card{position:relative;overflow:hidden;background:#fff;border:1px solid var(--line);border-radius:16px;padding:13px 14px;box-shadow:var(--shadow)}
+.card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:linear-gradient(180deg,#4cc0ff,#1383e6)}
+.card small{color:var(--mute);font-size:12px;font-weight:600}.card b{display:block;font-family:var(--display);font-size:20px;font-weight:700;letter-spacing:-.02em;margin-top:4px;color:var(--gd)}
+.box{background:#fff;border:1px solid var(--line);border-radius:18px;padding:14px;margin-top:13px;overflow-x:auto;box-shadow:var(--shadow)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:9px 9px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{color:var(--mute);font-weight:700;font-size:12px;background:var(--mint)}th:first-child{border-radius:9px 0 0 9px}th:last-child{border-radius:0 9px 9px 0}
+tbody tr:hover td{background:#f5fbff}
+.tag{padding:3px 10px;border-radius:12px;font-size:11.5px;font-weight:700;background:#e2f6ec;color:#0b7a55}.tag.x{background:#fde8e6;color:var(--red)}.tag.cr{background:#fff3d6;color:#8a5a00}.tag.lk{background:#ece6f7;color:#5a3d99}.tag.fz{background:#dcefff;color:#0b5394}
+.form{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px;align-items:end}
+.login{max-width:340px;margin:12vh auto;background:#fff;padding:24px 20px;border-radius:24px;border:1px solid var(--line);box-shadow:0 26px 50px -26px rgba(15,111,208,.55)}
+.login h1{font-size:26px;color:var(--g)}
+.err{color:var(--red);font-size:13px;margin-top:8px;min-height:16px}
+.modal{position:fixed;inset:0;background:rgba(10,47,85,.45);display:grid;place-items:center;padding:14px;z-index:5}
+.sheet{background:#fff;border-radius:22px;padding:18px;width:100%;max-width:400px;max-height:90vh;overflow:auto;box-shadow:0 30px 60px -28px rgba(10,47,85,.6)}
+.sheet h2{font-family:var(--display);font-size:17px;color:var(--gd)}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--gd);color:#fff;padding:10px 18px;border-radius:22px;z-index:9;font-size:13.5px;font-weight:600;box-shadow:0 12px 24px -12px #0a2f55}
+@media(max-width:700px){.wrap{flex-direction:column}aside{position:sticky;top:0;z-index:4;width:100%;height:auto;align-self:stretch;display:flex;flex-wrap:nowrap;gap:5px;padding:10px 12px;overflow-x:auto;scrollbar-width:none;align-items:center}aside::before{display:none}aside h2{width:auto;padding:0 8px 0 2px;white-space:nowrap;font-size:15px}aside button{width:auto;margin:0;white-space:nowrap;padding:8px 12px;font-size:13px}main{padding:13px}}
+:focus-visible{outline:3px solid var(--sky);outline-offset:2px}
 </style>
 </head>
 <body>
@@ -228,9 +242,20 @@ function sfHistory(){
   </div>`;
 }
 window.sfHF = (k,v) => { S.sellForm[k] = v; const h = $("#sf_hist"); if (h) h.innerHTML = sfHistory(); };
+function sfWallets(){
+  const f = S.sellForm, sw = S.swl && S.swl.uid===f.u ? S.swl : null, mut = "font-size:12px;color:var(--mute)";
+  if (!sw || sw.list===null) return `<div style="margin-top:8px;${mut}">Loading wallets...</div>`;
+  if (sw.err) return `<div style="margin-top:8px;font-size:13px;color:#c0392b">Could not load wallets (${esc(sw.err)}). Enter the number manually.</div>`;
+  const on = sw.list.filter(w=>w.online===true), off = sw.list.filter(w=>w.online!==true);
+  let h = on.length
+    ? `<div style="margin-top:8px;${mut}">Online wallets (${on.length}) — tap to use:</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${on.map((w,i)=>`<button class="sm ${w.number===f.n && w.type===f.m ? "" : "out"}" data-swpick="${i}">${payName(w.type)} · ${esc(w.number)}</button>`).join("")}</div>`
+    : `<div style="margin-top:8px;${mut}">No online wallet. Enter the number manually.</div>`;
+  if (off.length) h += `<div style="margin-top:6px;${mut}">Offline: ${off.map(w=>payName(w.type)+" "+esc(w.number)).join(", ")}</div>`;
+  return h;
+}
 function sfResults(){
   const f = S.sellForm, sel = f.u && S.users.find(x=>x.id===f.u);
-  if (sel) return `<div style="margin-top:8px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font-size:14px;line-height:1.6"><b>${esc(uName(sel)||sel.id.slice(0,6))}</b> · ref ${esc(sel.code||"-")}<br>Current balance: <b>${fmt(sel.balance||0)} BDT</b> <button class="sm out" data-sfclear style="margin-left:6px">Change</button></div>`;
+  if (sel) return `<div style="margin-top:8px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font-size:14px;line-height:1.6"><b>${esc(uName(sel)||sel.id.slice(0,6))}</b> · ref ${esc(sel.code||"-")}<br>Current balance: <b>${fmt(sel.balance||0)} BDT</b> <button class="sm out" data-sfclear style="margin-left:6px">Change</button>${sfWallets()}</div>`;
   const q = String(f.q||"").trim().toLowerCase();
   if (!q) return `<div style="margin-top:8px;font-size:12px;color:var(--mute)">Type the user's referral code to find them.</div>`;
   const hits = S.users.filter(u => String(u.code||"").toLowerCase().includes(q) || String(uName(u)||"").toLowerCase().includes(q))
@@ -249,12 +274,12 @@ window.sfUser = v => { S.sellForm.u = v; S.sellForm.n = ""; loadSellWallets(v); 
 async function loadSellWallets(uid){
   if (!uid) { S.swl = null; render(); return; }
   S.swl = { uid, list:null }; render();
-  let list = [];
+  let list = [], er = "";
   try {
     if (!DEMO) { const q = await fb.getDocs(fb.collection(db,"users",uid,"wallets")); list = q.docs.map(d=>({ id:d.id, ...d.data() })); }
-  } catch(e) { console.error(e); toast("Could not load user's wallets"); }
+  } catch(e) { console.error(e); er = e.code || e.message || "error"; toast("Could not load user's wallets: "+er); }
   if (S.sellForm.u !== uid) return;
-  S.swl = { uid, list };
+  S.swl = { uid, list, err:er };
   const on = list.filter(w=>w.online===true);
   if (on.length) { S.sellForm.m = on[0].type; S.sellForm.n = on[0].number; }
   render();
@@ -264,22 +289,11 @@ function sells(){
   const fl = [["all","All"],["processing","Processing"],["success","Success"],["failed","Failed"],["lock","Lock"]];
   const cnt = k => k==="all" ? S.sells.length : S.sells.filter(o=>o.status===k).length;
   const f = S.sellForm;
-  const sw = S.swl && S.swl.uid===f.u ? S.swl : null;
-  let hint = "";
-  if (f.u) {
-    if (!sw || sw.list===null) hint = `<div style="margin-top:8px;font-size:12px;color:var(--mute)">Loading user's wallets...</div>`;
-    else {
-      const on = sw.list.filter(w=>w.online===true), off = sw.list.filter(w=>w.online!==true);
-      hint = on.length
-        ? `<div style="margin-top:8px;font-size:12px;color:var(--mute)">User's online wallets (tap to use):</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${on.map((w,i)=>`<button class="sm ${w.number===f.n && w.type===f.m ? "" : "out"}" data-swpick="${i}">${payName(w.type)} · ${esc(w.number)}</button>`).join("")}</div>`
-        : `<div style="margin-top:8px;font-size:12px;color:var(--mute)">This user has no online wallet${off.length ? " (offline: "+off.map(w=>payName(w.type)+" "+esc(w.number)).join(", ")+")" : ""}. Enter the number manually.</div>`;
-    }
-  }
   return `<h1>Sell orders (Withdraw)</h1><div class="box"><h3 style="margin-bottom:10px">Create sell order</h3><div class="form">
   <div><label>User (search by referral code)</label><input id="sf_q" placeholder="Type referral code..." autocomplete="off" value="${esc(f.q||"")}" oninput="window.sfSearch(this.value)"><div id="sf_res">${sfResults()}</div></div>
   <div><label>Amount (BDT)</label><input id="sf_a" type="number" min="100" placeholder="100 or more" value="${esc(f.a)}" oninput="window.sfSet('a',this.value)"></div>
   <div><label>Send money via</label><select id="sf_m" onchange="window.sfSet('m',this.value)"><option value="bkash" ${f.m==="bkash"?"selected":""}>bKash</option><option value="nagad" ${f.m==="nagad"?"selected":""}>Nagad</option></select></div>
-  <div><label>Receive number (user's wallet)</label><input id="sf_n" type="tel" placeholder="01XXXXXXXXX" value="${esc(f.n)}" oninput="window.sfSet('n',this.value)">${hint}</div>
+  <div><label>Receive number (user's wallet)</label><input id="sf_n" type="tel" placeholder="01XXXXXXXXX" value="${esc(f.n)}" oninput="window.sfSet('n',this.value)"></div>
   <button data-addsell>Create sell order</button></div></div>
   <div id="sf_hist">${sfHistory()}</div>
   <div class="box"><p style="font-size:14px;color:var(--mute);line-height:1.6;margin-bottom:12px">Users cannot sell by themselves. Create the sell order here: the amount is cut from the user's balance at once and the request shows below as <b>Processing</b> (the user sees it in Order History → BDT Sell). The user's online wallet number is shown when you pick the user. To collect the money, create a task yourself in <b>Buy orders</b> with that number, or send the money directly. Nothing changes automatically: mark the request <b>Success</b> or <b>Failed</b> (the amount is refunded to the user, only once) yourself, whenever you decide. <b>Lock</b> holds the request and keeps the balance cut.</p>
@@ -301,7 +315,7 @@ function render(){
   const r = $("#root"), ae = document.activeElement, keepId = ae && (ae.id==="oq"||ae.id==="sq"||ae.id==="sf_a"||ae.id==="sf_n"||ae.id==="sf_q") ? ae.id : null, keepOq = keepId ? ae.selectionStart : null;
   if (!S.admin) { r.innerHTML = login(); return; }
   const n=(k,l)=>`<button class="${S.tab===k?"act":""}" data-tab="${k}">${l}</button>`;
-  r.innerHTML = `<div class="wrap"><aside><h2>Nerivo Admin</h2>${n("dash","Dashboard")}${n("users","Users")}${n("orders","Buy orders")}${n("sells","Sell orders")}${n("settings","Settings")}<button data-logout style="margin-top:18px">Log out</button></aside><main>${({dash,users,orders,sells,settings})[S.tab]()}</main></div>`;
+  r.innerHTML = `<div class="wrap"><aside><h2>Nerivo Admin</h2>${n("dash","Dashboard")}${n("users","Users")}${n("orders","Buy orders")}${n("sells","Sell orders")}${n("settings","Settings")}<button data-logout style="margin-top:18px;background:rgba(255,255,255,.18);color:#fff">Log out</button></aside><main>${({dash,users,orders,sells,settings})[S.tab]()}</main></div>`;
   if (keepOq !== null) { const el = $("#"+keepId); if (el) { el.focus(); try { el.setSelectionRange(keepOq,keepOq); } catch {} } }
 }
 
