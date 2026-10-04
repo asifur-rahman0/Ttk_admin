@@ -15,6 +15,7 @@ body{font-family:var(--body);font-size:14px;line-height:1.4;background:radial-gr
 button{font:inherit;font-weight:600;cursor:pointer;border:0;border-radius:11px;padding:8px 14px;background:linear-gradient(160deg,#42b9ff,#1383e6);color:#fff;box-shadow:0 8px 14px -9px rgba(19,131,230,.9);transition:filter .15s}
 button:hover{filter:brightness(1.05)}
 button.out{background:#fff;color:var(--g);border:1.5px solid var(--sky);box-shadow:none}button.red{background:var(--red);box-shadow:none}button.sm{padding:5px 11px;font-size:12.5px;border-radius:9px}
+button.cpb{background:none;box-shadow:none;color:var(--g);padding:0;border-radius:6px;font-weight:600;font-size:inherit;text-align:left}button.cpb:hover{filter:none;text-decoration:underline}
 input,select{font:inherit;padding:9px 11px;border:1.5px solid var(--line);border-radius:11px;background:#fff;width:100%;color:var(--ink);transition:border-color .15s,box-shadow .15s}
 input:focus,select:focus{outline:0;border-color:var(--sky);box-shadow:0 0 0 3px rgba(56,182,255,.2)}
 label{display:block;font-size:12px;font-weight:600;color:var(--mute);margin-top:10px;margin-bottom:3px}
@@ -150,7 +151,7 @@ function users(){
   <label style="display:flex;align-items:center;gap:8px;font-size:14px;margin-bottom:12px"><input type="checkbox" style="width:auto" ${S.showDel?"checked":""} onchange="window.toggleDel(this.checked)"> Show deleted accounts</label>
   <table><thead><tr><th>Phone</th><th>Code</th><th>Referred by</th><th>Last IP</th><th>Balance</th><th>Income</th><th>Status</th><th></th></tr></thead><tbody id="ub">${userRows(visU())}</tbody></table></div>`;
 }
-const userRows = list => list.length ? list.map(u=>{ const refCode = u.referredBy ? (S.users.find(x=>x.id===u.referredBy)?.code || u.referredBy.slice(0,6)+"...") : "-"; return `<tr><td>${esc(uName(u))}</td><td>${esc(u.code)}</td><td>${esc(refCode)}</td><td>${esc(u.lastIp||"-")}</td><td>${fmt(u.balance)}</td><td>${fmt(u.income)}</td><td><span class="tag ${ACC_TC[uStatus(u)]||""}">${ACC[uStatus(u)]}</span></td><td style="white-space:nowrap"><button class="sm out" data-edit="${u.id}">Edit</button> <button class="sm" data-bal="${u.id}">Balance</button> <button class="sm out" data-acct="${u.id}">Account</button> <button class="sm out" data-uhist="${u.id}">History</button></td></tr>`; }).join("") : `<tr><td colspan="8" style="color:var(--mute)">No users found.</td></tr>`;
+const userRows = list => list.length ? list.map(u=>{ const refCode = u.referredBy ? (S.users.find(x=>x.id===u.referredBy)?.code || u.referredBy.slice(0,6)+"...") : "-"; return `<tr><td>${cp(uName(u))}</td><td>${cp(u.code)}</td><td>${esc(refCode)}</td><td>${esc(u.lastIp||"-")}</td><td>${fmt(u.balance)}</td><td>${fmt(u.income)}</td><td><span class="tag ${ACC_TC[uStatus(u)]||""}">${ACC[uStatus(u)]}</span></td><td style="white-space:nowrap"><button class="sm out" data-edit="${u.id}">Edit</button> <button class="sm" data-bal="${u.id}">Balance</button> <button class="sm out" data-acct="${u.id}">Account</button> <button class="sm out" data-uhist="${u.id}">History</button></td></tr>`; }).join("") : `<tr><td colspan="8" style="color:var(--mute)">No users found.</td></tr>`;
 const visU = () => S.users.filter(u => S.showDel || uStatus(u) !== "deleted");
 window.toggleDel = v => { S.showDel = v; render(); };
 window.filterUsers = v => { v=v.toLowerCase(); $("#ub").innerHTML = userRows(visU().filter(u=>[u.phone,u.email,u.code,u.lastIp].join(" ").toLowerCase().includes(v))); };
@@ -171,10 +172,11 @@ function orderRows(){
   const when = o => tms(o.claimedAt) || tms(o.createdAt);
   return list.slice().sort((a,b)=>((rank[OS(a)]??5)-(rank[OS(b)]??5)) || (when(b)-when(a))).map(o => {
     const st = OS(o), claimed = !!o.claimedBy;
-    const proof = o.trxId ? `${esc(o.payMethod)} from ${esc(o.senderNumber)}<br>TrxID: ${esc(o.trxId)}${dup[o.trxId.toUpperCase()]>1 ? ' <span class="tag x">DUPLICATE</span>' : ""}`
+    const proof = o.trxId ? `${esc(o.payMethod)} from ${cp(o.senderNumber)}<br>TrxID: ${cp(o.trxId)}${dup[o.trxId.toUpperCase()]>1 ? ' <span class="tag x">DUPLICATE</span>' : ""}`
       : (o.payMethod ? `${esc(o.payMethod)}<br><span style="color:var(--mute)">TrxID not submitted</span>` : "-");
+    const rv = o.receiverId ? `<br><span class="tag ${o.receiverStatus==="received" ? "" : o.receiverStatus==="not_received" ? "x" : "cr"}">Receiver: ${o.receiverStatus==="received" ? "Received ✓" : o.receiverStatus==="not_received" ? "NOT received ✗" : "waiting"}</span>` : "";
     const opts = (claimed ? [o.trxId ? "pending" : "created","success","failed","lock","open"] : ["open","lock"]).map(k=>`<option value="${k}" ${k===st?"selected":""}>${k==="open" && claimed ? "Open (release)" : LBL[k]}</option>`).join("");
-    return `<tr><td>${esc(fdt(when(o)))}</td><td>${fmt(o.amount)}</td><td>bKash: ${esc(o.bkashNumber||"-")}<br>Nagad: ${esc(o.nagadNumber||"-")}</td><td><span class="tag ${TC[st]||""}">${esc(LBL[st]||st)}</span></td><td>${esc(userLabel(o.claimedBy))}</td><td>${proof}</td>
+    return `<tr><td>${esc(fdt(when(o)))}</td><td>${fmt(o.amount)}</td><td>bKash: ${cp(o.bkashNumber)}<br>Nagad: ${cp(o.nagadNumber)}${o.receiverId ? `<br><span style="font-size:12px;color:var(--mute)">Receiver: ${esc(o.receiverName||"")} · ref ${esc(o.receiverCode||"")}</span>` : ""}</td><td><span class="tag ${TC[st]||""}">${esc(LBL[st]||st)}</span></td><td>${esc(userLabel(o.claimedBy))}</td><td>${proof}${rv}</td>
     <td><select id="st_${o.id}" style="width:auto;padding:6px 8px;font-size:13px">${opts}</select> <button class="sm" data-apply="${o.id}">Apply</button> <button class="sm out" data-hist="${o.id}">History</button> <button class="sm red" data-delorder="${o.id}">Delete</button></td></tr>`;
   }).join("");
 }
@@ -201,6 +203,7 @@ function orders(){
   <div><label>Nagad number (user sends money here)</label>${wsel("nagad","on")}<input id="on" type="tel" placeholder="01XXXXXXXXX" value=""></div>
   <div><label>Buyer mask</label><input id="om" placeholder="179***7kPO"></div>
   <div><label>Reward rate %</label><input id="orr" type="number" step="0.1" value="3"></div>
+  <div style="grid-column:span 2"><label>Receiver user's referral code (the platform user who gets this money)</label><input id="orc" placeholder="Referral code" autocomplete="off" oninput="window.orcHint(this.value)"><div id="orc_res"></div></div>
   <button data-addorder>Create order</button></div></div>
   ${walletBox()}
   <div class="box"><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${fl.map(([k,l])=>`<button class="sm ${S.of===k?"":"out"}" data-ofilter="${k}">${l} (${cnt(k)})</button>`).join("")}</div>
@@ -221,7 +224,7 @@ function sellRows(){
     const fin = o.status==="success" || o.status==="failed";
     const opts = ["processing","success","failed","lock"].map(k=>`<option value="${k}" ${k===o.status?"selected":""}>${k==="processing" && o.status==="lock" ? "Processing (unlock)" : SL[k]}</option>`).join("");
     const act = fin ? `<span style="color:var(--mute);font-size:13px">Final</span> ` : `<select id="ss_${o.id}" style="width:auto;padding:6px 8px;font-size:13px">${opts}</select> <button class="sm" data-sapply="${o.id}">Apply</button> `;
-    return `<tr><td>${esc(fdt(tms(o.createdAt)||(o.history&&o.history[0]&&o.history[0].at)||0))}</td><td>${fmt(o.amount)}</td><td>${esc(payName(o.method))}<br>${esc(o.number)}</td><td><span class="tag ${STC[o.status]||""}">${esc(SL[o.status]||o.status)}</span>${o.refunded ? ' <span class="tag cr">Refunded</span>' : ""}</td><td>${esc(userLabel(o.userId))}</td><td>${act}<button class="sm out" data-shist="${o.id}">History</button></td></tr>`;
+    return `<tr><td>${esc(fdt(tms(o.createdAt)||(o.history&&o.history[0]&&o.history[0].at)||0))}</td><td>${fmt(o.amount)}</td><td>${esc(payName(o.method))}<br>${cp(o.number)}</td><td><span class="tag ${STC[o.status]||""}">${esc(SL[o.status]||o.status)}</span>${o.refunded ? ' <span class="tag cr">Refunded</span>' : ""}</td><td>${esc(userLabel(o.userId))}</td><td>${act}<button class="sm out" data-shist="${o.id}">History</button></td></tr>`;
   }).join("");
 }
 window.sfSet = (k,v) => { S.sellForm[k] = v; };
@@ -323,6 +326,35 @@ const supUrl = (type, raw) => {
 };
 const supRows = () => S.sup.map((x,i)=>`<tr><td>${supIcon(x.type,30)}</td><td>${esc(x.label)}<br><span style="font-size:12px;color:var(--mute)">${supName(x.type)}</span></td><td style="max-width:220px;overflow:hidden;text-overflow:ellipsis"><a href="${esc(x.url)}" target="_blank" rel="noopener" style="color:var(--g)">${esc(x.url)}</a></td><td>${i>0 ? `<button class="sm out" data-upsup="${esc(x.id)}">↑</button> ` : ""}<button class="sm red" data-delsup="${esc(x.id)}">Delete</button></td></tr>`).join("");
 const tutRows = () => S.tuts.map((t,i)=>`<tr><td>${i+1}</td><td>${esc(t.title)}${t.sub ? `<br><span style="font-size:12px;color:var(--mute)">${esc(t.sub)}</span>` : ""}</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis"><a href="${esc(t.url)}" target="_blank" rel="noopener" style="color:var(--g)">${esc(t.url)}</a></td><td>${i>0 ? `<button class="sm out" data-uptut="${esc(t.id)}">↑</button> ` : ""}<button class="sm red" data-deltut="${esc(t.id)}">Delete</button></td></tr>`).join("");
+/* Copy to clipboard. Tries the old textarea method first (works on http pages and iOS, must run right inside the tap),
+   then the modern API. Resolves true if copied. */
+function copyText(text){
+  text = String(text ?? "");
+  const prev = document.activeElement;
+  let ok = false;
+  try {
+    const ios = /ipad|iphone|ipod/i.test(navigator.userAgent || "");
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.setAttribute("aria-hidden", "true");
+    if (!ios) ta.setAttribute("readonly", "");
+    ta.style.cssText = "position:fixed;left:0;top:0;width:2em;height:2em;padding:0;border:0;outline:0;box-shadow:none;background:transparent;opacity:.01;font-size:16px";
+    document.body.appendChild(ta);
+    if (ios) {
+      ta.contentEditable = "true"; ta.readOnly = false;
+      const r = document.createRange(); r.selectNodeContents(ta);
+      const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+      ta.setSelectionRange(0, 999999);
+    } else { ta.focus(); ta.select(); ta.setSelectionRange(0, text.length); }
+    ok = document.execCommand("copy");
+    ta.remove();
+    try { if (prev && prev.focus) prev.focus(); } catch {}
+  } catch {}
+  // also write through the modern clipboard API when the page allows it (https), so Gboard/clipboard managers see it
+  try { if (navigator.clipboard && window.isSecureContext) { const pr = navigator.clipboard.writeText(text); if (ok) { pr.catch(()=>{}); return Promise.resolve(true); } return pr.then(() => true, () => false); } } catch {}
+  return Promise.resolve(ok);
+}
+const cp = v => v ? `<button class="cpb" data-cp="${esc(v)}" title="Tap to copy">${esc(v)} ⧉</button>` : "-";
+const copyOrShow = async (text, okMsg) => { if (await copyText(text)) toast(okMsg); else { toast("Could not copy automatically"); try { window.prompt("Copy this:", text); } catch {} } };
 /* ---------- Redeem codes ---------- */
 const genCode = () => { const A = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let c = ""; for (let i=0;i<8;i++) c += A[Math.floor(Math.random()*A.length)]; return c; };
 const rcFindUser = ref => { const q = String(ref||"").trim().toLowerCase(); return q ? S.users.find(u=>String(u.code||"").toLowerCase()===q) : null; };
@@ -375,8 +407,8 @@ async function createRC(){
     });
   } catch(e) { console.error(e); return toast(e.message || "Create failed"); }
   S.rc = { amount:"", code:"", target:"all", ref:"", max:"" };
-  try { await navigator.clipboard.writeText(code); } catch {}
-  render(); toast("Code created: "+code+" (copied)");
+  const copied = await copyText(code);
+  render(); toast("Code created: "+code+(copied ? " (copied)" : ""));
 }
 
 function settings(){
@@ -460,12 +492,30 @@ function editUser(id){
   };
 }
 
+S.rw = {};
+window.orcHint = async v => {
+  const el = $("#orc_res"); if (!el) return;
+  const u = rcFindUser(v);
+  if (!String(v||"").trim()) { el.innerHTML = `<div style="margin-top:6px;font-size:12px;color:var(--mute)">Optional. The receiver will be asked in their app to confirm "Received / Not received".</div>`; return; }
+  if (!u) { el.innerHTML = `<div style="margin-top:6px;font-size:13px;color:var(--red)">No user found with this referral code.</div>`; return; }
+  let list = S.rw[u.id];
+  el.innerHTML = `<div style="margin-top:6px;font-size:13px;color:#0b7a55">✓ <b>${esc(uName(u)||u.id.slice(0,6))}</b></div><div style="font-size:12px;color:var(--mute)">${list ? "" : "Loading wallets..."}</div>`;
+  if (!list) {
+    try { list = DEMO ? [] : (await fb.getDocs(fb.collection(db,"users",u.id,"wallets"))).docs.map(d=>d.data()); } catch(e) { list = []; }
+    S.rw[u.id] = list;
+    if (String($("#orc")?.value||"").trim().toLowerCase() !== String(u.code||"").toLowerCase()) return;
+  }
+  const on = list.filter(w=>w.online===true);
+  el.innerHTML = `<div style="margin-top:6px;font-size:13px;color:#0b7a55">✓ <b>${esc(uName(u)||u.id.slice(0,6))}</b></div>` + (on.length ? `<div style="margin-top:6px;font-size:12px;color:var(--mute)">Online wallets (tap to fill):</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">${on.map(w=>`<button class="sm out" data-orfill="${esc(w.type)}|${esc(w.number)}">${payName(w.type)} · ${esc(w.number)}</button>`).join("")}</div>` : `<div style="margin-top:6px;font-size:12px;color:var(--mute)">No online wallet for this user.</div>`);
+};
 async function addOrder(){
   const bk = $("#ob").value.trim(), ng = $("#on").value.trim(), okn = n => /^01\d{9}$/.test(n);
   if ((bk && !okn(bk)) || (ng && !okn(ng))) return toast("Numbers must be 11 digits starting with 01");
   if (!bk && !ng) return toast("Enter a bKash or Nagad number");
   const o = { amount:Number($("#oa").value), type: bk && ng ? "both" : (bk ? "bkash" : "nagad"), bkashNumber:bk, nagadNumber:ng, mask:$("#om").value.trim()||"179***"+Math.random().toString(36).slice(2,6), rate:Number($("#orr").value), cancels:0, status:"open" };
   if (!(o.amount>=100)) return toast("Amount must be 100 or more");
+  const rc = $("#orc").value.trim();
+  if (rc) { const ru = rcFindUser(rc); if (!ru) return toast("No user found with this receiver referral code"); o.receiverId = ru.id; o.receiverCode = ru.code || ""; o.receiverName = uName(ru) || ""; }
   try {
     if (DEMO) S.orders.unshift({id:String(Date.now()),...o}); else await fb.addDoc(fb.collection(db,"buyOrders"),{...o,createdAt:fb.serverTimestamp()});
   } catch(e) {
@@ -502,7 +552,8 @@ async function setStatus(id, ns){
   if (cur === ns) return toast("Already "+LBL[ns]);
   if (ns === "success" && !claimed) return toast("No user has claimed this order");
   if (ns === "open" && cur === "success") return toast("A successful order cannot be released");
-  const msg = ns === "success" ? "Mark SUCCESS? This adds "+fmt(o.amount)+" BDT + "+fmt(Math.round(o.amount*o.rate)/100)+" BDT reward to the user's balance (only once)."
+  const warn = ns === "success" && o.receiverId && o.receiverStatus !== "received" ? (o.receiverStatus === "not_received" ? "⚠ The receiver says they did NOT receive this payment!\n\n" : "⚠ The receiver has not confirmed yet.\n\n") : "";
+  const msg = ns === "success" ? warn+"Mark SUCCESS? This adds "+fmt(o.amount)+" BDT + "+fmt(Math.round(o.amount*o.rate)/100)+" BDT reward to the user's balance (only once)."
     : ns === "open" ? "Release this order back to the pool? The user's claim will be removed."
     : "Change status to "+LBL[ns]+"?"+(cur === "success" ? " The balance already added to the user stays (adjust it in Users if needed)." : "");
   if (!confirm(msg)) { render(); return; }
@@ -745,6 +796,7 @@ async function saveReasons(){ if (!DEMO) await fb.setDoc(fb.doc(db,"settings","r
 document.addEventListener("click", async e=>{
   const t = e.target.closest("button"); if(!t) return; const d = t.dataset;
   if ("tab" in d) { S.tab=d.tab; render(); }
+  else if ("cp" in d) copyOrShow(d.cp, "Copied: "+d.cp);
   else if ("login" in d) doLogin();
   else if ("edit" in d) editUser(d.edit);
   else if ("addorder" in d) addOrder();
@@ -757,6 +809,7 @@ document.addEventListener("click", async e=>{
   else if ("hist" in d) showHistory(d.hist);
   else if ("shist" in d) showSellHistory(d.shist);
   else if ("addsell" in d) createSell();
+  else if ("orfill" in d) { const [t,n] = d.orfill.split("|"); const i = $(t==="nagad" ? "#on" : "#ob"); if (i) i.value = n; }
   else if ("sfpick" in d) window.sfUser(d.sfpick);
   else if ("sfclear" in d) { S.sellForm.u = ""; S.sellForm.n = ""; S.sellForm.q = ""; S.swl = null; render(); }
   else if ("swpick" in d) { const on = ((S.swl && S.swl.list) || []).filter(w=>w.online===true), w = on[Number(d.swpick)]; if (w) { S.sellForm.m = w.type; S.sellForm.n = w.number; render(); } }
@@ -774,7 +827,7 @@ document.addEventListener("click", async e=>{
     try { await saveReasons(); render(); toast("Reason added"); } catch(e) { S.reasons = prev; render(); toast("Failed: "+(e.code||e.message)); }
   }
   else if ("addrc" in d) createRC();
-  else if ("rccopy" in d) { try { await navigator.clipboard.writeText(d.rccopy); toast("Copied: "+d.rccopy); } catch { toast(d.rccopy); } }
+  else if ("rccopy" in d) copyOrShow(d.rccopy, "Copied: "+d.rccopy);
   else if ("rctoggle" in d) {
     const o = S.rcodes.find(x=>x.id===d.rctoggle); if (!o) return;
     const on = o.active === false;
