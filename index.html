@@ -121,7 +121,7 @@ S.sup = [];
 S.rcodes = [];
 S.transfers = [];
 S.tf = { fq:"", tq:"", a:"", n:"" };
-S.ttab = "new"; S.tfs = ""; S.tfd = "0"; S.transferLimit = 0;
+S.ttab = "new"; S.tfs = ""; S.tfd = "0"; S.transferLimit = 0; S.bonus = 0;
 S.rc = { amount:"", code:"", target:"all", ref:"", max:"" };
 const RT = { credit:"Add balance", debit:"Cut balance", both:"Add & Cut" };
 const modal = html => { const m = document.createElement("div"); m.className = "modal"; m.innerHTML = `<div class="sheet">${html}</div>`; document.body.append(m); return m; };
@@ -559,6 +559,13 @@ function settings(){
   const rows = S.reasons.map(r=>`<tr><td>${esc(r.label)}</td><td>${RT[r.type]||esc(r.type)}</td><td><button class="sm red" data-delreason="${esc(r.id)}">Delete</button></td></tr>`).join("");
   return `<h1>Settings</h1><div class="box" style="max-width:420px"><h3 style="margin-bottom:6px">Rates &amp; rewards</h3><label>USDT exchange (1 USDT = ? BDT)</label><input id="ru" type="number" step="0.01" value="${S.rates.usdt}">
   <label>USDT bonus %</label><input id="rb" type="number" step="0.1" value="${S.rates.bonus}"><button style="margin-top:16px" data-saverates>Save rates</button></div>
+  <div class="box" style="max-width:420px"><h3 style="margin-bottom:6px">Sign up bonus</h3><p style="font-size:13px;color:var(--mute);line-height:1.5">Amount a user gets once when they tap Claim in <b>Mine → New Rewards</b>. Each user can claim it only one time. Set 0 to turn it off.</p>
+  <label>Bonus amount (BDT)</label><input id="sb_v" type="number" min="0" step="0.01" placeholder="e.g. 50" value="${S.bonus || ""}"><button style="margin-top:12px" data-savebonus>Save bonus</button></div>
+  <div class="box" style="max-width:420px"><h3 style="margin-bottom:6px">Language</h3><p style="font-size:13px;color:var(--mute);line-height:1.5">Choose which languages users can pick in <b>Mine → Language</b>, and the default language. Users who have not chosen a language see the default. A user who picked a language that you later turn off will see the default again.</p>
+  <label style="display:flex;align-items:center;gap:8px;margin-top:10px"><input type="checkbox" id="lg_en" style="width:auto" ${((S.langCfg&&S.langCfg.enabled)||["en","bn"]).includes("en")?"checked":""}> English available</label>
+  <label style="display:flex;align-items:center;gap:8px;margin-top:6px"><input type="checkbox" id="lg_bn" style="width:auto" ${((S.langCfg&&S.langCfg.enabled)||["en","bn"]).includes("bn")?"checked":""}> বাংলা (Bangla) available</label>
+  <label>Default language</label><select id="lg_def"><option value="en" ${((S.langCfg&&S.langCfg.default)||"en")==="en"?"selected":""}>English</option><option value="bn" ${((S.langCfg&&S.langCfg.default)||"en")==="bn"?"selected":""}>বাংলা (Bangla)</option></select>
+  <button style="margin-top:12px" data-savelang>Save language</button></div>
   <div class="box" style="max-width:520px"><h3 style="margin-bottom:6px">Balance reasons</h3><p style="font-size:13px;color:var(--mute)">These appear when you add or cut a user's balance, and the user sees them in Balance Details.</p>
   <div class="form" style="margin-top:8px"><div><label>Reason name</label><input id="rn" placeholder="e.g. Bonus"></div><div><label>Used for</label><select id="rt"><option value="credit">Add balance</option><option value="debit">Cut balance</option><option value="both">Add &amp; Cut</option></select></div><button data-addreason>Add reason</button></div>
   <table style="margin-top:12px"><thead><tr><th>Reason</th><th>Used for</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="3" style="color:var(--mute)">No reasons yet.</td></tr>`}</tbody></table></div>
@@ -619,6 +626,8 @@ function subscribe(){
     onSnapshot(collection(db,"buyOrders"), s=>{ S.orders=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, err("buyOrders")),
     onSnapshot(collection(db,"sellOrders"), s=>{ S.sells=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, err("sellOrders")),
     onSnapshot(doc(db,"settings","transferLimit"), s=>{ S.transferLimit = s.exists() ? (Number(s.data().perUserPerDay)||0) : 0; if(S.tab!=="settings") render(); }, ()=>{}),
+    onSnapshot(doc(db,"settings","language"), s=>{ S.langCfg = s.exists() ? s.data() : null; if(S.tab!=="settings") render(); }, ()=>{}),
+    onSnapshot(doc(db,"settings","signupBonus"), s=>{ S.bonus = s.exists() ? (Number(s.data().amount)||0) : 0; if(S.tab!=="settings") render(); }, ()=>{}),
     onSnapshot(collection(db,"transfers"), s=>{ S.transfers=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, err("transfers")),
     onSnapshot(collection(db,"redeemCodes"), s=>{ S.rcodes=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, err("redeemCodes")),
     onSnapshot(doc(db,"settings","support"), s=>{ if(s.exists() && Array.isArray(s.data().list)) S.sup=s.data().list; if(S.tab!=="settings") render(); }, ()=>{}),
@@ -819,7 +828,7 @@ function showHistory(id){
   const ev = [];
   if (tms(o.createdAt)) ev.push({ at:tms(o.createdAt), t:"Order created by admin ("+fmt(o.amount)+" BDT)" });
   const hs = o.history || [];
-  hs.forEach(h => ev.push({ at:h.at||0, t:(h.by === "admin" ? "Admin"+(h.admin ? " ("+h.admin+")" : "") : "User "+userLabel(h.uid||o.claimedBy))+" → "+(LBL[NS(h.status)]||h.status)+(h.note ? " — "+h.note : "") }));
+  hs.forEach(h => ev.push({ at:h.at||0, t:(h.by === "admin" ? "Admin"+(h.admin ? " ("+h.admin+")" : "") : h.by === "system" ? "System" : "User "+userLabel(h.uid||o.claimedBy))+" → "+(LBL[NS(h.status)]||h.status)+(h.note ? " — "+h.note : "") }));
   if (!hs.length) {      /* old orders without a history log */
     if (tms(o.claimedAt)) ev.push({ at:tms(o.claimedAt), t:"Claimed by "+userLabel(o.claimedBy) });
     if (tms(o.submittedAt)) ev.push({ at:tms(o.submittedAt), t:"Payment proof submitted ("+(o.trxId||"-")+")" });
@@ -950,7 +959,7 @@ async function userHistory(id){
       rows.sort((a,b)=>tms(b.createdAt)-tms(a.createdAt));
     }
   } catch(e) { $("#uh_b").textContent = "Could not load: "+(e.code||e.message); return; }
-  const lab = l => l.kind==="transfer_out" ? "Transfer sent" : l.kind==="transfer_in" ? "Transfer received" : l.kind==="redeem" ? "Redeem code ("+(l.code||"")+")" : l.kind==="withdraw" ? "Sell / Withdraw" : l.kind==="withdraw_refund" ? "Withdraw refund" : l.kind==="adjust" ? (l.reason||"Balance adjustment") : l.kind==="reward" ? "Task reward" : "Order amount";
+  const lab = l => l.kind==="signup_bonus" ? "Sign up bonus" : l.kind==="transfer_out" ? "Transfer sent" : l.kind==="transfer_in" ? "Transfer received" : l.kind==="redeem" ? "Redeem code ("+(l.code||"")+")" : l.kind==="withdraw" ? "Sell / Withdraw" : l.kind==="withdraw_refund" ? "Withdraw refund" : l.kind==="adjust" ? (l.reason||"Balance adjustment") : l.kind==="reward" ? "Task reward" : "Order amount";
   const row = l => { const deb = (l.kind==="adjust" && l.direction==="debit") || l.kind==="withdraw" || l.kind==="transfer_out"; return `<div style="padding:9px 0;border-bottom:1px solid var(--line);font-size:14px;display:flex;gap:10px"><div style="flex:1"><b>${esc(lab(l))}</b>${l.note ? `<div>${esc(l.note)}</div>` : ""}<div style="color:var(--mute);font-size:12px">${esc(fdt(tms(l.createdAt)))}${l.by ? " · by "+esc(l.by) : ""}${l.balanceAfter!=null ? " · balance after "+fmt(l.balanceAfter) : ""}</div></div><b style="color:${deb?"var(--red)":"var(--g)"}">${deb?"−":"+"}${fmt(l.amount)}</b></div>`; };
   const log = (u.statusLog||[]).slice().sort((a,b)=>b.at-a.at).map(e=>`<div style="padding:7px 0;border-bottom:1px solid var(--line);font-size:13px"><span class="tag ${ACC_TC[e.status]||""}">${esc(ACC[e.status]||e.status)}</span> ${esc(e.note||"")}<div style="color:var(--mute);font-size:12px">${esc(fdt(e.at))} · ${esc(e.by||"")}</div></div>`).join("");
   $("#uh_b").style.color = "inherit";
@@ -1063,6 +1072,16 @@ document.addEventListener("click", async e=>{
   else if ("delw" in d) {
     const [k,i] = d.delw.split(":"); if (!confirm("Delete this saved number? Existing orders keep their number.")) return;
     S.wl[k].splice(+i,1); await saveW(); render(); toast("Deleted");
+  }
+  else if ("savelang" in d) {
+    const enabled = [["en","#lg_en"],["bn","#lg_bn"]].filter(([k,id])=>$(id).checked).map(x=>x[0]), def = $("#lg_def").value;
+    if (!enabled.length) return toast("Turn on at least one language");
+    if (!enabled.includes(def)) return toast("The default language must be one of the available languages");
+    try { if (!DEMO) await fb.setDoc(fb.doc(db,"settings","language"), { default:def, enabled }); S.langCfg = { default:def, enabled }; render(); toast("Language saved"); } catch(e) { toast("Failed: "+(e.code||e.message)); }
+  }
+  else if ("savebonus" in d) {
+    const v = Math.max(0, Math.round((Number($("#sb_v").value)||0)*100)/100);
+    try { if (!DEMO) await fb.setDoc(fb.doc(db,"settings","signupBonus"), { amount:v }); S.bonus = v; render(); toast(v ? "Sign up bonus saved: "+fmt(v)+" BDT" : "Sign up bonus turned off"); } catch(e) { toast("Failed: "+(e.code||e.message)); }
   }
   else if ("saverates" in d) {
     const r = { usdt:Number($("#ru").value), bonus:Number($("#rb").value) };
