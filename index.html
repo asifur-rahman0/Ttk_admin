@@ -119,6 +119,9 @@ S.reasons = DEFAULT_REASONS.map(r => ({...r}));
 S.tuts = [];
 S.sup = [];
 S.rcodes = [];
+S.transfers = [];
+S.tf = { fq:"", tq:"", a:"", n:"" };
+S.ttab = "new"; S.tfs = ""; S.tfd = "0"; S.transferLimit = 0;
 S.rc = { amount:"", code:"", target:"all", ref:"", max:"" };
 const RT = { credit:"Add balance", debit:"Cut balance", both:"Add & Cut" };
 const modal = html => { const m = document.createElement("div"); m.className = "modal"; m.innerHTML = `<div class="sheet">${html}</div>`; document.body.append(m); return m; };
@@ -142,8 +145,32 @@ function dash(){
   const sum = k => live.reduce((a,u)=>a+Number(u[k]||0),0);
   const n = k => S.orders.filter(o=>OS(o)===k).length;
   const sn = k => S.sells.filter(o=>o.status===k).length;
-  const c = (t,v)=>`<div class="card"><small>${t}</small><b>${v}</b></div>`;
-  return `<h1>Dashboard</h1><div class="cards">${c("Users",live.length)}${c("Total user balance",fmt(sum("balance"))+" BDT")}${c("Total income paid",fmt(sum("income"))+" BDT")}${c("Sale amount",fmt(sum("saleAmount"))+" BDT")}${c("Open orders",n("open"))}${c("Order Create",n("created"))}${c("Pending",n("pending"))}${c("Success",n("success"))}${c("Failed",n("failed"))}${c("Lock",n("lock"))}${c("Withdraw processing",sn("processing"))}${c("Withdraw success",sn("success"))}${c("Total withdrawn",fmt(S.sells.filter(o=>o.status==="success").reduce((a,o)=>a+Number(o.amount||0),0))+" BDT")}</div>`;
+  const ds = dayStart();
+  const doneAt = o => tms(o.reviewedAt) || ((o.history && o.history.length) ? (o.history[o.history.length-1].at||0) : 0) || tms(o.createdAt);
+  const c = (t,v,sub)=>`<div class="card"><small>${t}</small><b>${v}</b>${sub ? `<div style="font-size:12px;color:var(--mute);margin-top:2px">${sub}</div>` : ""}</div>`;
+  const amt = l => fmt(l.reduce((a,o)=>a+Number(o.amount||0),0))+" BDT";
+  // same cards for "Today" and for "Total"
+  const block = today => {
+    const T = t => today ? t >= ds : true;
+    const tr = S.transfers.filter(x=>T(tms(x.createdAt)||Date.now()));
+    const by = S.orders.filter(o=>OS(o)==="success" && T(doneAt(o)));
+    const bc = S.orders.filter(o=>T(tms(o.createdAt)));
+    const wd = k => S.sells.filter(o=>o.status===k && T(doneAt(o)));
+    const wc = (t,k) => { const l = wd(k); return c(t,amt(l),l.length+" order"+(l.length===1?"":"s")); };
+    const nu = live.filter(u=>T(tms(u.createdAt)));
+    return c("Transferred",amt(tr),tr.length+" transfer"+(tr.length===1?"":"s"))
+      + c("Buy success",amt(by),by.length+" order"+(by.length===1?"":"s"))
+      + wc("Withdraw success","success")
+      + wc("Withdraw pending","processing")
+      + wc("Withdraw failed","failed")
+      + wc("Withdraw lock","lock")
+      + c("Buy orders created",amt(bc),bc.length+" order"+(bc.length===1?"":"s"))
+      + c("New users",nu.length);
+  };
+  return `<h1>Dashboard</h1>
+  <h3 style="margin:2px 0 8px">Today</h3><div class="cards">${block(true)}</div>
+  <h3 style="margin:18px 0 8px">Total (all time)</h3><div class="cards">${block(false)}</div>
+  <h3 style="margin:18px 0 8px">Overview</h3><div class="cards">${c("Users",live.length)}${c("Total user balance",fmt(sum("balance"))+" BDT")}${c("Total income paid",fmt(sum("income"))+" BDT")}${c("Sale amount",fmt(sum("saleAmount"))+" BDT")}${c("Open orders",n("open"))}${c("Order Create",n("created"))}${c("Pending",n("pending"))}${c("Failed",n("failed"))}${c("Lock",n("lock"))}${c("Withdraw pending",sn("processing"))}${c("Withdraw lock",sn("lock"))}${c("Withdraw failed",sn("failed"))}</div>`;
 }
 
 function users(){
@@ -174,9 +201,8 @@ function orderRows(){
     const st = OS(o), claimed = !!o.claimedBy;
     const proof = o.trxId ? `${esc(o.payMethod)} from ${cp(o.senderNumber)}<br>TrxID: ${cp(o.trxId)}${dup[o.trxId.toUpperCase()]>1 ? ' <span class="tag x">DUPLICATE</span>' : ""}`
       : (o.payMethod ? `${esc(o.payMethod)}<br><span style="color:var(--mute)">TrxID not submitted</span>` : "-");
-    const rv = o.receiverId ? `<br><span class="tag ${o.receiverStatus==="received" ? "" : o.receiverStatus==="not_received" ? "x" : "cr"}">Receiver: ${o.receiverStatus==="received" ? "Received ✓" : o.receiverStatus==="not_received" ? "NOT received ✗" : "waiting"}</span>` : "";
     const opts = (claimed ? [o.trxId ? "pending" : "created","success","failed","lock","open"] : ["open","lock"]).map(k=>`<option value="${k}" ${k===st?"selected":""}>${k==="open" && claimed ? "Open (release)" : LBL[k]}</option>`).join("");
-    return `<tr><td>${esc(fdt(when(o)))}</td><td>${fmt(o.amount)}</td><td>bKash: ${cp(o.bkashNumber)}<br>Nagad: ${cp(o.nagadNumber)}${o.receiverId ? `<br><span style="font-size:12px;color:var(--mute)">Receiver: ${esc(o.receiverName||"")} · ref ${esc(o.receiverCode||"")}</span>` : ""}</td><td><span class="tag ${TC[st]||""}">${esc(LBL[st]||st)}</span></td><td>${esc(userLabel(o.claimedBy))}</td><td>${proof}${rv}</td>
+    return `<tr><td>${esc(fdt(when(o)))}</td><td>${fmt(o.amount)}</td><td>bKash: ${cp(o.bkashNumber)}<br>Nagad: ${cp(o.nagadNumber)}</td><td><span class="tag ${TC[st]||""}">${esc(LBL[st]||st)}</span></td><td>${esc(userLabel(o.claimedBy))}</td><td>${proof}</td>
     <td><select id="st_${o.id}" style="width:auto;padding:6px 8px;font-size:13px">${opts}</select> <button class="sm" data-apply="${o.id}">Apply</button> <button class="sm out" data-hist="${o.id}">History</button> <button class="sm red" data-delorder="${o.id}">Delete</button></td></tr>`;
   }).join("");
 }
@@ -203,7 +229,6 @@ function orders(){
   <div><label>Nagad number (user sends money here)</label>${wsel("nagad","on")}<input id="on" type="tel" placeholder="01XXXXXXXXX" value=""></div>
   <div><label>Buyer mask</label><input id="om" placeholder="179***7kPO"></div>
   <div><label>Reward rate %</label><input id="orr" type="number" step="0.1" value="3"></div>
-  <div style="grid-column:span 2"><label>Receiver user's referral code (the platform user who gets this money)</label><input id="orc" placeholder="Referral code" autocomplete="off" oninput="window.orcHint(this.value)"><div id="orc_res"></div></div>
   <button data-addorder>Create order</button></div></div>
   ${walletBox()}
   <div class="box"><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${fl.map(([k,l])=>`<button class="sm ${S.of===k?"":"out"}" data-ofilter="${k}">${l} (${cnt(k)})</button>`).join("")}</div>
@@ -297,7 +322,7 @@ function sells(){
   const fl = [["all","All"],["processing","Processing"],["success","Success"],["failed","Failed"],["lock","Lock"]];
   const cnt = k => k==="all" ? S.sells.length : S.sells.filter(o=>o.status===k).length;
   const f = S.sellForm;
-  return `<h1>Sell orders (Withdraw)</h1><div class="box"><h3 style="margin-bottom:10px">Create sell order</h3><div class="form">
+  return `<h1>Sell orders</h1><div class="box"><h3 style="margin-bottom:10px">Create sell order</h3><div class="form">
   <div><label>User (search by referral code)</label><input id="sf_q" placeholder="Type referral code..." autocomplete="off" value="${esc(f.q||"")}" oninput="window.sfSearch(this.value)"><div id="sf_res">${sfResults()}</div></div>
   <div><label>Amount (BDT)</label><input id="sf_a" type="number" min="100" placeholder="100 or more" value="${esc(f.a)}" oninput="window.sfSet('a',this.value)"></div>
   <div><label>Send money via</label><select id="sf_m" onchange="window.sfSet('m',this.value)"><option value="bkash" ${f.m==="bkash"?"selected":""}>bKash</option><option value="nagad" ${f.m==="nagad"?"selected":""}>Nagad</option></select></div>
@@ -411,6 +436,125 @@ async function createRC(){
   render(); toast("Code created: "+code+(copied ? " (copied)" : ""));
 }
 
+/* ---------- Balance transfer (admin only, hidden from users) ---------- */
+const dayStart = () => { const d = new Date(); d.setHours(0,0,0,0); return d.getTime(); };
+const tfRange = v => { if (v === "all") return [0, Infinity]; const a = new Date(); a.setHours(0,0,0,0); a.setDate(a.getDate()-Number(v)); const b = new Date(a); b.setDate(b.getDate()+1); return [a.getTime(), b.getTime()]; };
+// per receiving user: times / total / today / last. With a range only transfers inside it are counted.
+const tfStats = range => { const m = {}, ds = dayStart(), rg = range || [0, Infinity]; S.transfers.forEach(x => { const t = tms(x.createdAt) || Date.now(); if (t < rg[0] || t >= rg[1]) return; const r = m[x.to] || (m[x.to] = { n:0, total:0, today:0, last:0 }); r.n++; r.total += Number(x.amount||0); if (t >= ds) r.today += Number(x.amount||0); if (t > r.last) r.last = t; }); return m; };
+const tfDayOpts = cur => `<option value="0" ${cur==="0"?"selected":""}>Today</option>` + Array.from({length:29},(_,i)=>i+1).map(d=>`<option value="${d}" ${String(cur)===String(d)?"selected":""}>${d} day${d>1?"s":""} ago</option>`).join("") + `<option value="all" ${cur==="all"?"selected":""}>All time</option>`;
+window.tfDay = v => { S.tfd = v; render(); };
+function tfListRows(kind){
+  const st = tfStats(tfRange(S.tfd)), q = String(S.tfs||"").trim().toLowerCase();
+  let list = S.users.filter(u => kind==="done" ? !!st[u.id] : !st[u.id]);
+  if (q) list = list.filter(u => [uName(u), u.code, u.lastIp].join(" ").toLowerCase().includes(q));
+  list.sort((a,b) => kind==="done" ? (st[b.id].last - st[a.id].last) : (Number(b.balance||0) - Number(a.balance||0)));
+  if (!list.length) return `<tr><td colspan="${kind==="done" ? 7 : 4}" style="color:var(--mute)">${kind==="done" ? "No user received a transfer in this period." : "No users here."}</td></tr>`;
+  return list.map(u => { const r = st[u.id];
+    const base = `<td>${cp(uName(u))}<br><span style="font-size:12px;color:var(--mute)">ref ${esc(u.code||"-")}</span></td><td><b>${fmt(u.balance||0)}</b></td><td>${esc(u.lastIp||"-")}</td>`;
+    return kind==="done"
+      ? `<tr>${base}<td>${r.n}</td><td>${fmt(r.total)}</td><td>${esc(fdt(r.last))}</td><td><button class="sm" data-tfgo="${esc(u.code||"")}">Transfer</button> <button class="sm out" data-tfhist="${esc(u.id)}">History</button></td></tr>`
+      : `<tr>${base}<td><button class="sm" data-tfgo="${esc(u.code||"")}">Transfer</button> <button class="sm out" data-tfhist="${esc(u.id)}">History</button></td></tr>`;
+  }).join("");
+}
+window.tfSearch = v => { S.tfs = v; const b = $("#tf_body"); if (b) b.innerHTML = tfListRows(S.ttab); };
+function tfHint(k){
+  const q = String(S.tf[k+"q"]||"").trim();
+  if (!q) return `<div style="margin-top:6px;font-size:12px;color:var(--mute)">Type the full referral code.</div>`;
+  const u = rcFindUser(q);
+  if (!u) return `<div style="margin-top:6px;font-size:13px;color:var(--red)">No user found with this referral code.</div>`;
+  const td = k === "t" ? (tfStats()[u.id] || {}).today || 0 : 0;
+  return `<div style="margin-top:6px;font-size:13px;color:#0b7a55">✓ <b>${esc(uName(u)||u.id.slice(0,6))}</b> · balance ${fmt(u.balance||0)} BDT</div>` + (k === "t" ? `<div style="font-size:12px;color:var(--mute)">Received by transfer today: ${fmt(td)}${S.transferLimit ? " / limit "+fmt(S.transferLimit) : " (no limit)"} BDT</div>` : "");
+}
+window.tfFind = (k,v) => { S.tf[k+"q"] = v; const el = $("#tf_"+k+"res"); if (el) el.innerHTML = tfHint(k); };
+window.tfSet = (k,v) => { S.tf[k] = v; };
+function transfer(){
+  const f = S.tf;
+  const rows = S.transfers.slice().sort((a,b)=>tms(b.createdAt)-tms(a.createdAt)).slice(0,50).map(x=>`<tr><td>${esc(fdt(tms(x.createdAt)))}</td><td>${esc(x.fromName||"")}<br><span style="font-size:12px;color:var(--mute)">ref ${esc(x.fromCode||"-")}</span></td><td>${esc(x.toName||"")}<br><span style="font-size:12px;color:var(--mute)">ref ${esc(x.toCode||"-")}</span></td><td>${fmt(x.amount)}</td><td>${esc(x.note||"")}</td><td>${esc(x.by||"")}</td></tr>`).join("");
+  const st = tfStats(tfRange(S.tfd)), doneN = S.users.filter(u=>st[u.id]).length, noneN = S.users.length - doneN;
+  const tabs = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px"><button class="sm ${S.ttab==="new"?"":"out"}" data-ttab="new">New transfer</button><button class="sm ${S.ttab==="done"?"":"out"}" data-ttab="done">Transferred users (${doneN})</button><button class="sm ${S.ttab==="none"?"":"out"}" data-ttab="none">Not transferred (${noneN})</button></div>`;
+  if (S.ttab !== "new") {
+    const head = S.ttab==="done" ? "<th>User</th><th>Balance</th><th>IP</th><th>Times</th><th>Amount</th><th>Last</th><th></th>" : "<th>User</th><th>Balance</th><th>IP</th><th></th>";
+    return `<h1>Balance transfer</h1>${tabs}<div class="box"><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px"><select style="width:auto;padding:7px 10px" onchange="window.tfDay(this.value)">${tfDayOpts(S.tfd)}</select><input id="tf_s" placeholder="Search name, referral code or IP..." value="${esc(S.tfs)}" style="max-width:320px" oninput="window.tfSearch(this.value)"></div><p style="font-size:13px;color:var(--mute);line-height:1.5;margin-bottom:10px">${S.ttab==="done" ? "Users who received a transfer in the chosen day. <b>Times</b> = number of transfers, <b>Amount</b> = total received in that day." : "Users who did <b>not</b> receive any transfer in the chosen day."}</p><table><thead><tr>${head}</tr></thead><tbody id="tf_body">${tfListRows(S.ttab)}</tbody></table></div>`;
+  }
+  return `<h1>Balance transfer</h1>${tabs}<div class="box"><h3 style="margin-bottom:6px">Transfer balance between users</h3><p style="font-size:13px;color:var(--mute);line-height:1.5">Only admin can transfer. The amount moves from one user's balance to another, as many times as you want. Users cannot see transfers in their history, you can see them in each user's History here. The daily limit per receiving user is set in Settings.</p>
+  <div class="form" style="margin-top:6px">
+  <div><label>From user (referral code)</label><input id="tf_f" placeholder="Referral code" autocomplete="off" value="${esc(f.fq)}" oninput="window.tfFind('f',this.value)"><div id="tf_fres">${tfHint("f")}</div></div>
+  <div><label>To user (referral code)</label><input id="tf_t" placeholder="Referral code" autocomplete="off" value="${esc(f.tq)}" oninput="window.tfFind('t',this.value)"><div id="tf_tres">${tfHint("t")}</div></div>
+  <div><label>Amount (BDT)</label><input id="tf_a" type="number" min="0.01" step="0.01" value="${esc(f.a)}" oninput="window.tfSet('a',this.value)"></div>
+  <div><label>Note (optional)</label><input id="tf_n" value="${esc(f.n)}" oninput="window.tfSet('n',this.value)"></div>
+  <button data-dotransfer>Transfer</button></div></div>
+  <div class="box"><table><thead><tr><th>Time</th><th>From</th><th>To</th><th>Amount</th><th>Note</th><th>By</th></tr></thead><tbody>${rows || `<tr><td colspan="6" style="color:var(--mute)">No transfers yet.</td></tr>`}</tbody></table></div>`;
+}
+async function doTransfer(){
+  const f = S.tf, a = rcFindUser(f.fq), b = rcFindUser(f.tq), amt = Math.round((Number(f.a)||0)*100)/100;
+  if (!a) return toast("From user not found");
+  if (!b) return toast("To user not found");
+  if (a.id === b.id) return toast("Choose two different users");
+  if (!(amt > 0)) return toast("Enter an amount");
+  if (amt > Number(a.balance||0)) return toast("From user's balance is not enough");
+  if (S.transferLimit > 0) { const today = (tfStats()[b.id] || {}).today || 0; if (today + amt > S.transferLimit + 0.001) return toast("Daily limit: "+fmt(S.transferLimit)+" BDT per user. Already "+fmt(today)+" today, you can send at most "+fmt(Math.max(0,S.transferLimit-today))+" more."); }
+  if (!confirm("Transfer "+fmt(amt)+" BDT\nFrom: "+(uName(a)||a.id.slice(0,6))+" (ref "+a.code+")\nTo: "+(uName(b)||b.id.slice(0,6))+" (ref "+b.code+")?")) return;
+  const note = String(f.n||"").trim();
+  try {
+    if (DEMO) {
+      a.balance = Math.round((Number(a.balance||0)-amt)*100)/100; b.balance = Math.round((Number(b.balance||0)+amt)*100)/100;
+      S.transfers.unshift({ id:String(Date.now()), from:a.id, to:b.id, fromCode:a.code, toCode:b.code, fromName:uName(a), toName:uName(b), amount:amt, note, by:adminEmail(), createdAt:Date.now() });
+    } else await fb.runTransaction(db, async t => {
+      const aRef = fb.doc(db,"users",a.id), bRef = fb.doc(db,"users",b.id), as = await t.get(aRef), bs = await t.get(bRef);
+      if (!as.exists() || !bs.exists()) throw new Error("User not found");
+      const ac = Number(as.data().balance||0), bc = Number(bs.data().balance||0);
+      if (amt > ac) throw new Error("From user's balance is not enough");
+      const an = Math.round((ac-amt)*100)/100, bn = Math.round((bc+amt)*100)/100;
+      t.update(aRef, { balance:an }); t.update(bRef, { balance:bn });
+      t.set(fb.doc(fb.collection(db,"transfers")), { from:a.id, to:b.id, fromCode:a.code||"", toCode:b.code||"", fromName:uName(a)||"", toName:uName(b)||"", amount:amt, note, fromAfter:an, toAfter:bn, by:adminEmail(), createdAt:fb.serverTimestamp() });
+    });
+  } catch(e) { console.error(e); return toast(e.message || "Transfer failed"); }
+  S.tf = { fq:"", tq:"", a:"", n:"" }; render(); toast("Transferred "+fmt(amt)+" BDT");
+}
+
+/* ---------- wallet removal (admin only) ---------- */
+async function loadEuWallets(uid){
+  const el = $("#eu_w"); if (!el) return;
+  let list = [];
+  try { if (!DEMO) list = (await fb.getDocs(fb.collection(db,"users",uid,"wallets"))).docs.map(d=>({ id:d.id, ...d.data() })); }
+  catch(e) { el.textContent = "Could not load wallets: "+(e.code||e.message); return; }
+  el.innerHTML = list.length ? list.map(w=>`<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line)"><span class="tag ${w.online ? "" : "cr"}">${esc(payName(w.type))}</span><b style="flex:1">${esc(w.number)}</b><span style="font-size:12px;color:var(--mute)">${w.online ? "Online" : "Offline"}</span><button class="sm red" data-rmw="${esc(uid)}|${esc(w.id)}|${esc(w.type)}|${esc(w.number)}">Remove</button></div>`).join("") : `<div style="color:var(--mute);font-size:13px">No wallets added.</div>`;
+}
+async function removeUserWallet(spec){
+  const [uid, wid, type, number] = spec.split("|");
+  if (!confirm("Remove this "+payName(type)+" wallet ("+number+")? The user can add a wallet again, and this number becomes free for other users.")) return;
+  try {
+    if (!DEMO) {
+      const kRef = fb.doc(db,"walletNumbers",type+"_"+number), ks = await fb.getDoc(kRef);
+      const b = fb.writeBatch(db);
+      b.delete(fb.doc(db,"users",uid,"wallets",wid));
+      if (ks.exists() && ks.data().uid === uid) b.delete(kRef);
+      await b.commit();
+    }
+    toast("Wallet removed"); loadEuWallets(uid);
+  } catch(e) { console.error(e); toast("Failed: "+(e.code||e.message)); }
+}
+async function backfillWalletKeys(){
+  if (DEMO) return toast("Demo mode");
+  if (!confirm("Scan all users' wallets and link each number to its owner? This is safe to run many times.")) return;
+  let added = 0, ok = 0; const conflicts = [];
+  toast("Scanning wallets...");
+  try {
+    for (const u of S.users) {
+      const snap = await fb.getDocs(fb.collection(db,"users",u.id,"wallets"));
+      for (const d of snap.docs) {
+        const w = d.data(); if (!w.type || !w.number) continue;
+        const kRef = fb.doc(db,"walletNumbers",w.type+"_"+w.number), ks = await fb.getDoc(kRef);
+        if (!ks.exists()) { await fb.setDoc(kRef, { uid:u.id, type:w.type, number:w.number, createdAt:fb.serverTimestamp() }); added++; }
+        else if (ks.data().uid === u.id) ok++;
+        else conflicts.push(payName(w.type)+" "+w.number+" is on "+(uName(u)||u.id.slice(0,6))+" and also on another user");
+      }
+    }
+  } catch(e) { console.error(e); return toast("Failed: "+(e.code||e.message)); }
+  toast("Done: "+added+" linked, "+ok+" already ok, "+conflicts.length+" duplicates");
+  if (conflicts.length) { const m = modal(`<h2>Duplicate wallet numbers</h2><p style="font-size:13px;color:var(--mute);margin-top:6px">These numbers are on more than one account. Remove the wrong one from Users → Edit → Wallets.</p><div style="margin-top:10px;font-size:14px">${conflicts.map(c=>`<div style="padding:7px 0;border-bottom:1px solid var(--line)">${esc(c)}</div>`).join("")}</div><button class="out" id="dw_c" style="margin-top:14px;width:100%">Close</button>`); $("#dw_c").onclick = () => m.remove(); }
+}
+
 function settings(){
   const rows = S.reasons.map(r=>`<tr><td>${esc(r.label)}</td><td>${RT[r.type]||esc(r.type)}</td><td><button class="sm red" data-delreason="${esc(r.id)}">Delete</button></td></tr>`).join("");
   return `<h1>Settings</h1><div class="box" style="max-width:420px"><h3 style="margin-bottom:6px">Rates &amp; rewards</h3><label>USDT exchange (1 USDT = ? BDT)</label><input id="ru" type="number" step="0.01" value="${S.rates.usdt}">
@@ -418,6 +562,9 @@ function settings(){
   <div class="box" style="max-width:520px"><h3 style="margin-bottom:6px">Balance reasons</h3><p style="font-size:13px;color:var(--mute)">These appear when you add or cut a user's balance, and the user sees them in Balance Details.</p>
   <div class="form" style="margin-top:8px"><div><label>Reason name</label><input id="rn" placeholder="e.g. Bonus"></div><div><label>Used for</label><select id="rt"><option value="credit">Add balance</option><option value="debit">Cut balance</option><option value="both">Add &amp; Cut</option></select></div><button data-addreason>Add reason</button></div>
   <table style="margin-top:12px"><thead><tr><th>Reason</th><th>Used for</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="3" style="color:var(--mute)">No reasons yet.</td></tr>`}</tbody></table></div>
+  <div class="box" style="max-width:720px"><h3 style="margin-bottom:6px">Transfer limit</h3><p style="font-size:13px;color:var(--mute);line-height:1.5">Maximum total amount that can be transferred <b>to one user per day</b> (counted from midnight). Leave empty or 0 for no limit.</p>
+  <div class="form" style="margin-top:6px"><div><label>Max BDT per user per day</label><input id="tl_v" type="number" min="0" step="1" placeholder="e.g. 5000" value="${S.transferLimit || ""}"></div><button data-savetl>Save limit</button></div></div>
+  <div class="box" style="max-width:720px"><h3 style="margin-bottom:6px">Wallet number binding</h3><p style="font-size:13px;color:var(--mute);line-height:1.5">New wallets are linked to one account automatically. Run this once so wallets that users added before this update are linked too. It also lists numbers that are on more than one account.</p><button data-wbfill style="margin-top:8px">Link existing wallets</button></div>
   <div class="box" style="max-width:720px"><h3 style="margin-bottom:6px">Support links</h3><p style="font-size:13px;color:var(--mute)">These show when a user taps Live Support. Pick Telegram or WhatsApp so the right logo appears, then paste a group, channel or chat link. You can also type a Telegram @username or a WhatsApp number with country code, and it becomes a link automatically.</p>
   <div class="form" style="margin-top:8px"><div><label>Type</label><select id="sut"><option value="telegram">Telegram</option><option value="whatsapp">WhatsApp</option></select></div><div><label>Name shown to user</label><input id="sun" placeholder="e.g. Support group"></div><div style="grid-column:span 2"><label>Link</label><input id="sul" placeholder="https://t.me/... or https://chat.whatsapp.com/..."></div><button data-addsup>Add link</button></div>
   <table style="margin-top:12px"><thead><tr><th></th><th>Name</th><th>Link</th><th></th></tr></thead><tbody>${supRows() || `<tr><td colspan="4" style="color:var(--mute)">No support links yet.</td></tr>`}</tbody></table></div>
@@ -426,11 +573,40 @@ function settings(){
   <table style="margin-top:12px"><thead><tr><th>#</th><th>Title</th><th>Link</th><th></th></tr></thead><tbody>${tutRows() || `<tr><td colspan="4" style="color:var(--mute)">No tutorial videos yet.</td></tr>`}</tbody></table></div>`;
 }
 
+const navSnap = () => ({ t:S.tab, tt:S.tab==="transfer" ? S.ttab : null });
+function navApply(nv){ S.tab = nv.t; if (nv.tt) S.ttab = nv.tt; render(); }
+/* ---- back support: phone back button / browser back / on-screen back ---- */
+let navIdx = 0, navLast = null, navRestoring = false, navIgnore = 0;
+function navSync(){
+  if (navRestoring) return;
+  try {
+    const snap = navSnap(), key = JSON.stringify(snap);
+    if (navLast === null) { history.replaceState({ nv:snap, i:0 }, ""); navLast = key; navIdx = 0; return; }
+    if (key !== navLast) { history.pushState({ nv:snap, i:++navIdx }, ""); navLast = key; }
+  } catch {}
+}
+try {
+  new MutationObserver(muts => muts.forEach(mu => {
+    mu.addedNodes.forEach(n => { if (n.classList && n.classList.contains("modal")) { n._h = true; try { history.pushState({ m:1, i:navIdx }, ""); } catch {} } });
+    mu.removedNodes.forEach(n => { if (n.classList && n.classList.contains("modal") && n._h && !n._pop) { navIgnore++; try { history.back(); } catch { navIgnore--; } } });
+  })).observe(document.body, { childList:true });
+} catch {}
+window.addEventListener("popstate", e => {
+  if (navIgnore > 0) { navIgnore--; return; }
+  const top = [...document.querySelectorAll(".modal")].pop();
+  if (top) { top._pop = true; top.remove(); return; }
+  const st = e.state; if (!st || !st.nv) return;
+  navRestoring = true; navIdx = st.i || 0;
+  navApply(st.nv);
+  navRestoring = false;
+  navLast = JSON.stringify(navSnap());
+});
 function render(){
-  const r = $("#root"), ae = document.activeElement, keepId = ae && (/^(oq|sq|sf_a|sf_n|sf_q|rc_a|rc_c|rc_r|rc_m)$/.test(ae.id)) ? ae.id : null, keepOq = keepId ? ae.selectionStart : null;
+  const r = $("#root"), ae = document.activeElement, keepId = ae && (/^(oq|sq|sf_a|sf_n|sf_q|rc_a|rc_c|rc_r|rc_m|tf_f|tf_t|tf_a|tf_n|tf_s|tl_v)$/.test(ae.id)) ? ae.id : null, keepOq = keepId ? ae.selectionStart : null;
   if (!S.admin) { r.innerHTML = login(); return; }
   const n=(k,l)=>`<button class="${S.tab===k?"act":""}" data-tab="${k}">${l}</button>`;
-  r.innerHTML = `<div class="wrap"><aside><h2>Nova Pay Admin</h2>${n("dash","Dashboard")}${n("users","Users")}${n("orders","Buy orders")}${n("sells","Sell orders")}${n("redeem","Redeem codes")}${n("settings","Settings")}<button data-logout style="margin-top:18px;background:rgba(255,255,255,.18);color:#fff">Log out</button></aside><main>${({dash,users,orders,sells,redeem,settings})[S.tab]()}</main></div>`;
+  r.innerHTML = `<div class="wrap"><aside><h2>Nova Pay Admin</h2>${n("dash","Dashboard")}${n("users","Users")}${n("orders","Buy orders")}${n("sells","Sell orders")}${n("redeem","Redeem codes")}${n("transfer","Transfer")}${n("settings","Settings")}<button data-logout style="margin-top:18px;background:rgba(255,255,255,.18);color:#fff">Log out</button></aside><main>${navIdx>0 ? `<button class="sm out" data-goback style="margin-bottom:10px">‹ Back</button>` : ""}${({dash,users,orders,sells,redeem,transfer,settings})[S.tab]()}</main></div>`;
+  navSync();
   if (keepOq !== null) { const el = $("#"+keepId); if (el) { el.focus(); try { el.setSelectionRange(keepOq,keepOq); } catch {} } }
 }
 
@@ -442,6 +618,8 @@ function subscribe(){
     onSnapshot(collection(db,"users"), s=>{ S.users=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, err("users")),
     onSnapshot(collection(db,"buyOrders"), s=>{ S.orders=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, err("buyOrders")),
     onSnapshot(collection(db,"sellOrders"), s=>{ S.sells=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, err("sellOrders")),
+    onSnapshot(doc(db,"settings","transferLimit"), s=>{ S.transferLimit = s.exists() ? (Number(s.data().perUserPerDay)||0) : 0; if(S.tab!=="settings") render(); }, ()=>{}),
+    onSnapshot(collection(db,"transfers"), s=>{ S.transfers=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, err("transfers")),
     onSnapshot(collection(db,"redeemCodes"), s=>{ S.rcodes=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, err("redeemCodes")),
     onSnapshot(doc(db,"settings","support"), s=>{ if(s.exists() && Array.isArray(s.data().list)) S.sup=s.data().list; if(S.tab!=="settings") render(); }, ()=>{}),
     onSnapshot(doc(db,"settings","tutorials"), s=>{ if(s.exists() && Array.isArray(s.data().list)) S.tuts=s.data().list; if(S.tab!=="settings") render(); }, ()=>{}),
@@ -469,10 +647,12 @@ function editUser(id){
   m.innerHTML = `<div class="sheet"><h2>${esc(uName(u))}</h2>
   <div class="box" style="margin-top:10px;padding:10px 14px;font-size:13px;color:var(--mute)">Referral code: <b>${esc(u.code||"-")}</b> &nbsp; Last IP: <b>${esc(u.lastIp||"-")}</b>${u.lastSeenAt ? " ("+esc(u.lastSeenAt.toDate ? u.lastSeenAt.toDate().toLocaleString() : "")+")" : ""}<br>Passwords cannot be viewed (Firebase never stores them in readable form). Use "Send password reset" below if the user is locked out.</div>
   <div class="box" style="margin-top:10px;padding:10px 14px;font-size:13px;color:var(--mute)">Balance: <b>${fmt(u.balance)} BDT</b>. To add or cut balance use the <b>Balance</b> button (reason is saved in history).</div>${f("income","Today's income")}${f("saleAmount","Sale amount")}${f("saleOrders","Sale orders")}${f("purchaseAmount","Purchase amount")}${f("purchaseOrders","Purchase orders")}
+  <label style="margin-top:14px">Wallets (only admin can remove)</label><div id="eu_w" class="box" style="margin-top:4px;padding:8px 12px;font-size:14px;color:var(--mute)">Loading...</div>
   <label>Set referrer (referral code or UID)</label><input id="f_ref" placeholder="${u.referredBy ? "Already set" : "e.g. ab12cd"}">
   <div style="display:flex;gap:10px;margin-top:18px;flex-wrap:wrap"><button id="sv">Save changes</button><button class="out" id="cn">Cancel</button></div></div>`;
   document.body.append(m);
   $("#cn").onclick = () => m.remove();
+  loadEuWallets(id);
   $("#sv").onclick = async () => {
     const d = {}; ["income","saleAmount","saleOrders","purchaseAmount","purchaseOrders"].forEach(k=>d[k]=Number($("#f_"+k).value)||0);
     d.statsDate = (()=>{const x=new Date();return x.getFullYear()+"-"+String(x.getMonth()+1).padStart(2,"0")+"-"+String(x.getDate()).padStart(2,"0")})();
@@ -492,30 +672,12 @@ function editUser(id){
   };
 }
 
-S.rw = {};
-window.orcHint = async v => {
-  const el = $("#orc_res"); if (!el) return;
-  const u = rcFindUser(v);
-  if (!String(v||"").trim()) { el.innerHTML = `<div style="margin-top:6px;font-size:12px;color:var(--mute)">Optional. The receiver will be asked in their app to confirm "Received / Not received".</div>`; return; }
-  if (!u) { el.innerHTML = `<div style="margin-top:6px;font-size:13px;color:var(--red)">No user found with this referral code.</div>`; return; }
-  let list = S.rw[u.id];
-  el.innerHTML = `<div style="margin-top:6px;font-size:13px;color:#0b7a55">✓ <b>${esc(uName(u)||u.id.slice(0,6))}</b></div><div style="font-size:12px;color:var(--mute)">${list ? "" : "Loading wallets..."}</div>`;
-  if (!list) {
-    try { list = DEMO ? [] : (await fb.getDocs(fb.collection(db,"users",u.id,"wallets"))).docs.map(d=>d.data()); } catch(e) { list = []; }
-    S.rw[u.id] = list;
-    if (String($("#orc")?.value||"").trim().toLowerCase() !== String(u.code||"").toLowerCase()) return;
-  }
-  const on = list.filter(w=>w.online===true);
-  el.innerHTML = `<div style="margin-top:6px;font-size:13px;color:#0b7a55">✓ <b>${esc(uName(u)||u.id.slice(0,6))}</b></div>` + (on.length ? `<div style="margin-top:6px;font-size:12px;color:var(--mute)">Online wallets (tap to fill):</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">${on.map(w=>`<button class="sm out" data-orfill="${esc(w.type)}|${esc(w.number)}">${payName(w.type)} · ${esc(w.number)}</button>`).join("")}</div>` : `<div style="margin-top:6px;font-size:12px;color:var(--mute)">No online wallet for this user.</div>`);
-};
 async function addOrder(){
   const bk = $("#ob").value.trim(), ng = $("#on").value.trim(), okn = n => /^01\d{9}$/.test(n);
   if ((bk && !okn(bk)) || (ng && !okn(ng))) return toast("Numbers must be 11 digits starting with 01");
   if (!bk && !ng) return toast("Enter a bKash or Nagad number");
   const o = { amount:Number($("#oa").value), type: bk && ng ? "both" : (bk ? "bkash" : "nagad"), bkashNumber:bk, nagadNumber:ng, mask:$("#om").value.trim()||"179***"+Math.random().toString(36).slice(2,6), rate:Number($("#orr").value), cancels:0, status:"open" };
   if (!(o.amount>=100)) return toast("Amount must be 100 or more");
-  const rc = $("#orc").value.trim();
-  if (rc) { const ru = rcFindUser(rc); if (!ru) return toast("No user found with this receiver referral code"); o.receiverId = ru.id; o.receiverCode = ru.code || ""; o.receiverName = uName(ru) || ""; }
   try {
     if (DEMO) S.orders.unshift({id:String(Date.now()),...o}); else await fb.addDoc(fb.collection(db,"buyOrders"),{...o,createdAt:fb.serverTimestamp()});
   } catch(e) {
@@ -552,8 +714,7 @@ async function setStatus(id, ns){
   if (cur === ns) return toast("Already "+LBL[ns]);
   if (ns === "success" && !claimed) return toast("No user has claimed this order");
   if (ns === "open" && cur === "success") return toast("A successful order cannot be released");
-  const warn = ns === "success" && o.receiverId && o.receiverStatus !== "received" ? (o.receiverStatus === "not_received" ? "⚠ The receiver says they did NOT receive this payment!\n\n" : "⚠ The receiver has not confirmed yet.\n\n") : "";
-  const msg = ns === "success" ? warn+"Mark SUCCESS? This adds "+fmt(o.amount)+" BDT + "+fmt(Math.round(o.amount*o.rate)/100)+" BDT reward to the user's balance (only once)."
+  const msg = ns === "success" ? "Mark SUCCESS? This adds "+fmt(o.amount)+" BDT + "+fmt(Math.round(o.amount*o.rate)/100)+" BDT reward to the user's balance (only once)."
     : ns === "open" ? "Release this order back to the pool? The user's claim will be removed."
     : "Change status to "+LBL[ns]+"?"+(cur === "success" ? " The balance already added to the user stays (adjust it in Users if needed)." : "");
   if (!confirm(msg)) { render(); return; }
@@ -780,10 +941,17 @@ async function userHistory(id){
   let rows = [];
   try {
     if (DEMO) rows = u._ledger || [];
-    else { const q = await fb.getDocs(fb.query(fb.collection(db,"users",id,"ledger"), fb.orderBy("createdAt","desc"), fb.limit(100))); rows = q.docs.map(d=>({ id:d.id, ...d.data() })); }
+    else {
+      const q = await fb.getDocs(fb.query(fb.collection(db,"users",id,"ledger"), fb.orderBy("createdAt","desc"), fb.limit(100))); rows = q.docs.map(d=>({ id:d.id, ...d.data() }));
+      // admin-only transfers (users never see these)
+      const [o1, o2] = await Promise.all([fb.getDocs(fb.query(fb.collection(db,"transfers"), fb.where("from","==",id))), fb.getDocs(fb.query(fb.collection(db,"transfers"), fb.where("to","==",id)))]);
+      o1.docs.forEach(d=>{ const x = d.data(); rows.push({ id:d.id, kind:"transfer_out", direction:"debit", amount:x.amount, note:(x.note ? x.note+" · " : "")+"to "+(x.toName||"")+" (ref "+(x.toCode||"")+")", createdAt:x.createdAt, balanceAfter:x.fromAfter }); });
+      o2.docs.forEach(d=>{ const x = d.data(); rows.push({ id:d.id, kind:"transfer_in", direction:"credit", amount:x.amount, note:(x.note ? x.note+" · " : "")+"from "+(x.fromName||"")+" (ref "+(x.fromCode||"")+")", createdAt:x.createdAt, balanceAfter:x.toAfter }); });
+      rows.sort((a,b)=>tms(b.createdAt)-tms(a.createdAt));
+    }
   } catch(e) { $("#uh_b").textContent = "Could not load: "+(e.code||e.message); return; }
-  const lab = l => l.kind==="redeem" ? "Redeem code ("+(l.code||"")+")" : l.kind==="withdraw" ? "Sell / Withdraw" : l.kind==="withdraw_refund" ? "Withdraw refund" : l.kind==="adjust" ? (l.reason||"Balance adjustment") : l.kind==="reward" ? "Task reward" : "Order amount";
-  const row = l => { const deb = (l.kind==="adjust" && l.direction==="debit") || l.kind==="withdraw"; return `<div style="padding:9px 0;border-bottom:1px solid var(--line);font-size:14px;display:flex;gap:10px"><div style="flex:1"><b>${esc(lab(l))}</b>${l.note ? `<div>${esc(l.note)}</div>` : ""}<div style="color:var(--mute);font-size:12px">${esc(fdt(tms(l.createdAt)))}${l.by ? " · by "+esc(l.by) : ""}${l.balanceAfter!=null ? " · balance after "+fmt(l.balanceAfter) : ""}</div></div><b style="color:${deb?"var(--red)":"var(--g)"}">${deb?"−":"+"}${fmt(l.amount)}</b></div>`; };
+  const lab = l => l.kind==="transfer_out" ? "Transfer sent" : l.kind==="transfer_in" ? "Transfer received" : l.kind==="redeem" ? "Redeem code ("+(l.code||"")+")" : l.kind==="withdraw" ? "Sell / Withdraw" : l.kind==="withdraw_refund" ? "Withdraw refund" : l.kind==="adjust" ? (l.reason||"Balance adjustment") : l.kind==="reward" ? "Task reward" : "Order amount";
+  const row = l => { const deb = (l.kind==="adjust" && l.direction==="debit") || l.kind==="withdraw" || l.kind==="transfer_out"; return `<div style="padding:9px 0;border-bottom:1px solid var(--line);font-size:14px;display:flex;gap:10px"><div style="flex:1"><b>${esc(lab(l))}</b>${l.note ? `<div>${esc(l.note)}</div>` : ""}<div style="color:var(--mute);font-size:12px">${esc(fdt(tms(l.createdAt)))}${l.by ? " · by "+esc(l.by) : ""}${l.balanceAfter!=null ? " · balance after "+fmt(l.balanceAfter) : ""}</div></div><b style="color:${deb?"var(--red)":"var(--g)"}">${deb?"−":"+"}${fmt(l.amount)}</b></div>`; };
   const log = (u.statusLog||[]).slice().sort((a,b)=>b.at-a.at).map(e=>`<div style="padding:7px 0;border-bottom:1px solid var(--line);font-size:13px"><span class="tag ${ACC_TC[e.status]||""}">${esc(ACC[e.status]||e.status)}</span> ${esc(e.note||"")}<div style="color:var(--mute);font-size:12px">${esc(fdt(e.at))} · ${esc(e.by||"")}</div></div>`).join("");
   $("#uh_b").style.color = "inherit";
   $("#uh_b").innerHTML = `<h3 style="font-size:15px;margin-bottom:4px">Balance history</h3>${rows.length ? rows.map(row).join("") : `<div style="color:var(--mute)">No records yet.</div>`}${log ? `<h3 style="font-size:15px;margin:16px 0 4px">Account status log</h3>${log}` : ""}`;
@@ -795,7 +963,8 @@ async function saveReasons(){ if (!DEMO) await fb.setDoc(fb.doc(db,"settings","r
 
 document.addEventListener("click", async e=>{
   const t = e.target.closest("button"); if(!t) return; const d = t.dataset;
-  if ("tab" in d) { S.tab=d.tab; render(); }
+  if ("goback" in d) { if (navIdx > 0) history.back(); }
+  else if ("tab" in d) { S.tab=d.tab; render(); }
   else if ("cp" in d) copyOrShow(d.cp, "Copied: "+d.cp);
   else if ("login" in d) doLogin();
   else if ("edit" in d) editUser(d.edit);
@@ -809,7 +978,6 @@ document.addEventListener("click", async e=>{
   else if ("hist" in d) showHistory(d.hist);
   else if ("shist" in d) showSellHistory(d.shist);
   else if ("addsell" in d) createSell();
-  else if ("orfill" in d) { const [t,n] = d.orfill.split("|"); const i = $(t==="nagad" ? "#on" : "#ob"); if (i) i.value = n; }
   else if ("sfpick" in d) window.sfUser(d.sfpick);
   else if ("sfclear" in d) { S.sellForm.u = ""; S.sellForm.n = ""; S.sellForm.q = ""; S.swl = null; render(); }
   else if ("swpick" in d) { const on = ((S.swl && S.swl.list) || []).filter(w=>w.online===true), w = on[Number(d.swpick)]; if (w) { S.sellForm.m = w.type; S.sellForm.n = w.number; render(); } }
@@ -826,6 +994,16 @@ document.addEventListener("click", async e=>{
     const prev = S.reasons.slice(); S.reasons.push({ id:"r_"+Date.now().toString(36), label, type });
     try { await saveReasons(); render(); toast("Reason added"); } catch(e) { S.reasons = prev; render(); toast("Failed: "+(e.code||e.message)); }
   }
+  else if ("dotransfer" in d) doTransfer();
+  else if ("ttab" in d) { S.ttab = d.ttab; S.tfs = ""; render(); }
+  else if ("tfgo" in d) { S.tf.tq = d.tfgo; S.ttab = "new"; render(); scrollTo(0,0); }
+  else if ("tfhist" in d) userHistory(d.tfhist);
+  else if ("savetl" in d) {
+    const v = Math.max(0, Math.floor(Number($("#tl_v").value) || 0));
+    try { if (!DEMO) await fb.setDoc(fb.doc(db,"settings","transferLimit"), { perUserPerDay:v }); S.transferLimit = v; render(); toast(v ? "Limit saved: "+fmt(v)+" BDT per user per day" : "Limit removed"); } catch(e) { toast("Failed: "+(e.code||e.message)); }
+  }
+  else if ("rmw" in d) removeUserWallet(d.rmw);
+  else if ("wbfill" in d) backfillWalletKeys();
   else if ("addrc" in d) createRC();
   else if ("rccopy" in d) copyOrShow(d.rccopy, "Copied: "+d.rccopy);
   else if ("rctoggle" in d) {
