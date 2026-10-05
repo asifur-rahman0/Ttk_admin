@@ -123,6 +123,11 @@ S.transfers = [];
 S.tf = { fq:"", tq:"", a:"", n:"" };
 S.ttab = "new"; S.tfs = ""; S.tfd = "0"; S.transferLimit = 0; S.bonus = 0;
 S.rc = { amount:"", code:"", target:"all", ref:"", max:"" };
+/* Refer program: level i = the i-th person above the user who finished the task (A = direct referrer, B = referrer of A ...) */
+S.refCfg = null;
+const REF_DEF = { enabled:true, levels:[{pct:3,on:true},{pct:2,on:true},{pct:1,on:true}] };
+const refCfg = () => { const c = S.refCfg; return c && Array.isArray(c.levels) && c.levels.length ? { enabled:c.enabled!==false, levels:c.levels.map(l=>({ pct:Number(l.pct)||0, on:l.on!==false })) } : JSON.parse(JSON.stringify(REF_DEF)); };
+const lvName = i => String.fromCharCode(65+i)+" level";
 const RT = { credit:"Add balance", debit:"Cut balance", both:"Add & Cut" };
 const modal = html => { const m = document.createElement("div"); m.className = "modal"; m.innerHTML = `<div class="sheet">${html}</div>`; document.body.append(m); return m; };
 const adminEmail = () => (auth?.currentUser?.email) || "admin";
@@ -333,6 +338,44 @@ function sells(){
   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${fl.map(([k,l])=>`<button class="sm ${S.sf===k?"":"out"}" data-sofilter="${k}">${l} (${cnt(k)})</button>`).join("")}</div>
   <input id="sq" placeholder="Search user, number, amount..." value="${esc(S.sq)}" style="max-width:360px;margin-bottom:12px" oninput="window.filterSells(this.value)">
   <table><thead><tr><th>Time</th><th>Amount</th><th>Send money to</th><th>Status</th><th>User</th><th>Change status</th></tr></thead><tbody id="stb">${sellRows()}</tbody></table></div>`;
+}
+
+/* ---------- Refer program ---------- */
+function refStats(){
+  const by = {}, rows = [];
+  S.orders.forEach(o => (o.refPaid||[]).forEach(p => { const b = by[p.level] || (by[p.level] = { n:0, sum:0 }); b.n++; b.sum += Number(p.amount||0); rows.push({ ...p, orderAmount:o.amount, from:o.claimedBy, at:tms(o.reviewedAt)||tms(o.createdAt) }); }));
+  rows.sort((x,y)=>y.at-x.at);
+  return { by, rows, total:rows.reduce((s,r)=>s+Number(r.amount||0),0) };
+}
+function refer(){
+  const c = refCfg(), st = refStats(), last = c.levels.length-1;
+  const lvRows = c.levels.map((l,i)=>{ const s = st.by[i] || { n:0, sum:0 };
+    return `<tr><td><b>${lvName(i)}</b><br><span style="font-size:12px;color:var(--mute)">${i===0 ? "Direct referrer" : i+" step above the direct referrer"}</span></td>
+    <td><input data-rf="pct" data-i="${i}" type="number" min="0" max="100" step="0.01" value="${l.pct}" style="width:90px"></td>
+    <td><label style="display:flex;align-items:center;gap:6px;margin:0;font-size:13px;color:var(--ink)"><input data-rf="on" data-i="${i}" type="checkbox" style="width:auto" ${l.on?"checked":""}><span>${l.on?"On":"Off"}</span></label></td>
+    <td>${s.n}</td><td>${fmt(s.sum)}</td><td>${i===last && last>0 ? `<button class="sm red" data-rfdel>Remove</button>` : ""}</td></tr>`; }).join("");
+  const ex = c.levels.map((l,i)=>`${lvName(i)}: <b>${l.on ? fmt(Math.round(1000*l.pct)/100) : "off"}</b>`).join(" &nbsp;�&nbsp; ");
+  const rows = st.rows.slice(0,40).map(r=>`<tr><td>${esc(fdt(r.at))}</td><td>${esc(r.name||lvName(r.level))}</td><td>${esc(userLabel(r.uid))}</td><td>${esc(userLabel(r.from))}</td><td>${fmt(r.orderAmount)}</td><td>${r.pct}%</td><td><b>${fmt(r.amount)}</b></td></tr>`).join("");
+  return `<h1>Refer program</h1>
+  <div class="cards"><div class="card"><small>Program</small><b>${c.enabled ? "On" : "Off"}</b></div><div class="card"><small>Active levels</small><b>${c.levels.filter(l=>l.on).length} / ${c.levels.length}</b></div><div class="card"><small>Total commission paid</small><b>${fmt(st.total)} BDT</b></div><div class="card"><small>Commissions paid</small><b>${st.rows.length}</b></div></div>
+  <div class="box"><h3 style="margin-bottom:6px">Commission levels</h3>
+  <p style="font-size:13px;color:var(--mute);line-height:1.6">When a user's task (buy order) becomes <b>Success</b>, the people above that user get a commission automatically, as a % of the order amount: <b>A level</b> = the user's direct referrer, <b>B level</b> = the referrer of A, <b>C level</b> = the referrer of B, and so on. It is paid only once per order. Turn a level <b>Off</b> to stop paying it (the levels above it are still paid), change the %, or add a new level (D, E ...). Changes apply to orders that become Success after you save.</p>
+  <label style="display:flex;align-items:center;gap:8px;margin:12px 0;font-size:14px;color:var(--ink)"><input type="checkbox" id="rf_en" style="width:auto" ${c.enabled?"checked":""}> Refer program ON (turn off to stop all commissions)</label>
+  <table><thead><tr><th>Level</th><th>Commission %</th><th>Status</th><th>Paid (times)</th><th>Paid (BDT)</th><th></th></tr></thead><tbody>${lvRows}</tbody></table>
+  <div style="font-size:13px;color:var(--mute);margin-top:10px">Example, order of 1000 BDT: ${ex}</div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px"><button data-saveref>Save changes</button><button class="out" data-addlv ${c.levels.length>=10?"disabled":""}>+ Add ${c.levels.length<10 ? lvName(c.levels.length) : "level"}</button></div></div>
+  <div class="box"><h3 style="margin-bottom:10px">Recent commissions</h3><table><thead><tr><th>Time</th><th>Level</th><th>Upline (received)</th><th>Task user</th><th>Order</th><th>%</th><th>Commission</th></tr></thead><tbody>${rows || `<tr><td colspan="7" style="color:var(--mute)">No commission paid yet. It appears here after a user's order becomes Success.</td></tr>`}</tbody></table></div>`;
+}
+function collectRef(){
+  const c = refCfg();
+  document.querySelectorAll('[data-rf="pct"]').forEach(el=>{ const i = +el.dataset.i; if (c.levels[i]) c.levels[i].pct = Math.min(100, Math.max(0, Math.round((Number(el.value)||0)*100)/100)); });
+  document.querySelectorAll('[data-rf="on"]').forEach(el=>{ const i = +el.dataset.i; if (c.levels[i]) c.levels[i].on = el.checked; });
+  const en = $("#rf_en"); if (en) c.enabled = en.checked;
+  return c;
+}
+async function saveRef(c, msg){
+  try { if (!DEMO) await fb.setDoc(fb.doc(db,"settings","referral"), c); S.refCfg = c; render(); toast(msg || "Saved"); }
+  catch(e) { toast("Failed: "+(e.code||e.message)); }
 }
 
 const supIcon = (type, size) => {
@@ -611,8 +654,9 @@ window.addEventListener("popstate", e => {
 function render(){
   const r = $("#root"), ae = document.activeElement, keepId = ae && (/^(oq|sq|sf_a|sf_n|sf_q|rc_a|rc_c|rc_r|rc_m|tf_f|tf_t|tf_a|tf_n|tf_s|tl_v)$/.test(ae.id)) ? ae.id : null, keepOq = keepId ? ae.selectionStart : null;
   if (!S.admin) { r.innerHTML = login(); return; }
+  if (S.tab === "refer" && ae && ae.dataset && ae.dataset.rf === "pct") return;   /* do not wipe a % being typed */
   const n=(k,l)=>`<button class="${S.tab===k?"act":""}" data-tab="${k}">${l}</button>`;
-  r.innerHTML = `<div class="wrap"><aside><h2>Nova Pay Admin</h2>${n("dash","Dashboard")}${n("users","Users")}${n("orders","Buy orders")}${n("sells","Sell orders")}${n("redeem","Redeem codes")}${n("transfer","Transfer")}${n("settings","Settings")}<button data-logout style="margin-top:18px;background:rgba(255,255,255,.18);color:#fff">Log out</button></aside><main>${navIdx>0 ? `<button class="sm out" data-goback style="margin-bottom:10px">‹ Back</button>` : ""}${({dash,users,orders,sells,redeem,transfer,settings})[S.tab]()}</main></div>`;
+  r.innerHTML = `<div class="wrap"><aside><h2>Nova Pay Admin</h2>${n("dash","Dashboard")}${n("users","Users")}${n("orders","Buy orders")}${n("sells","Sell orders")}${n("refer","Refer program")}${n("redeem","Redeem codes")}${n("transfer","Transfer")}${n("settings","Settings")}<button data-logout style="margin-top:18px;background:rgba(255,255,255,.18);color:#fff">Log out</button></aside><main>${navIdx>0 ? `<button class="sm out" data-goback style="margin-bottom:10px">‹ Back</button>` : ""}${({dash,users,orders,sells,refer,redeem,transfer,settings})[S.tab]()}</main></div>`;
   navSync();
   if (keepOq !== null) { const el = $("#"+keepId); if (el) { el.focus(); try { el.setSelectionRange(keepOq,keepOq); } catch {} } }
 }
@@ -632,6 +676,7 @@ function subscribe(){
     onSnapshot(collection(db,"redeemCodes"), s=>{ S.rcodes=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, err("redeemCodes")),
     onSnapshot(doc(db,"settings","support"), s=>{ if(s.exists() && Array.isArray(s.data().list)) S.sup=s.data().list; if(S.tab!=="settings") render(); }, ()=>{}),
     onSnapshot(doc(db,"settings","tutorials"), s=>{ if(s.exists() && Array.isArray(s.data().list)) S.tuts=s.data().list; if(S.tab!=="settings") render(); }, ()=>{}),
+    onSnapshot(doc(db,"settings","referral"), s=>{ S.refCfg = s.exists() ? s.data() : null; if(S.tab!=="refer") render(); }, ()=>{}),
     onSnapshot(doc(db,"settings","reasons"), s=>{ if(s.exists() && Array.isArray(s.data().list)) S.reasons=s.data().list; if(S.tab!=="settings") render(); }, ()=>{}),
     onSnapshot(doc(db,"settings","wallets"), s=>{ if(s.exists()){ const d=s.data(); S.wl={bkash:d.bkash||[],nagad:d.nagad||[]}; } if(S.tab!=="orders") render(); }, ()=>{}),
     onSnapshot(doc(db,"settings","rates"), s=>{ if(s.exists()) S.rates=s.data(); if(S.tab!=="settings") render(); }, err("settings/rates"))
@@ -708,8 +753,26 @@ async function creditSuccess(id, entry){
     if (!us.exists()) throw new Error("User profile not found");
     const upd = { status:"success", reviewedAt:fb.serverTimestamp(), history:fb.arrayUnion(entry) };
     if (od.credited) { t.update(oRef, upd); return; }          /* balance was already added once, never add twice */
+    /* Refer program: read the settings + the upline chain first (all reads must happen before any write) */
+    const rs = await t.get(fb.doc(db,"settings","referral")), rd = rs.exists() && Array.isArray(rs.data().levels) && rs.data().levels.length ? rs.data() : REF_DEF;
+    const ups = [];
+    if (rd.enabled !== false) {
+      const seen = new Set([od.claimedBy]); let cur = us.data().referredBy;
+      for (let i = 0; i < rd.levels.length && cur && !seen.has(cur); i++) {
+        seen.add(cur);
+        const pRef = fb.doc(db,"users",cur), ps = await t.get(pRef); if (!ps.exists()) break;
+        const pd = ps.data(), lv = rd.levels[i], pct = Number(lv.pct)||0, camt = Math.round(od.amount * pct) / 100;
+        if (lv.on !== false && camt > 0 && (pd.accountStatus||"active") !== "deleted") ups.push({ i, uid:cur, ref:pRef, bal:Number(pd.balance||0), inc:Number(pd.refIncome||0), pct, amt:camt });
+        cur = pd.referredBy;
+      }
+    }
     const u = us.data(), fresh = u.statsDate !== day, reward = Math.round(od.amount * od.rate) / 100;
-    t.update(oRef, { ...upd, credited:true });
+    t.update(oRef, { ...upd, credited:true, refPaid:ups.map(p=>({ uid:p.uid, level:p.i, name:lvName(p.i), pct:p.pct, amount:p.amt })) });
+    ups.forEach(p => {
+      const nb = Math.round((p.bal + p.amt) * 100) / 100;
+      t.update(p.ref, { balance:nb, refIncome:Math.round((p.inc + p.amt) * 100) / 100 });
+      t.set(fb.doc(fb.collection(db,"users",p.uid,"ledger"), id+"_ref"+p.i), { kind:"referral", direction:"credit", amount:p.amt, level:p.i, levelName:lvName(p.i), pct:p.pct, orderId:id, fromUid:od.claimedBy, balanceAfter:nb, createdAt:fb.serverTimestamp() });
+    });
     t.update(uRef, { balance:Math.round(((u.balance||0)+od.amount+reward)*100)/100, income:(fresh?0:(u.income||0))+reward, purchaseAmount:(fresh?0:(u.purchaseAmount||0))+od.amount, purchaseOrders:(fresh?0:(u.purchaseOrders||0))+1, statsDate:day });
     const L = fb.collection(db,"users",od.claimedBy,"ledger");
     t.set(fb.doc(L,id+"_buy"), { kind:"purchase", amount:od.amount, orderId:id, createdAt:fb.serverTimestamp() });
@@ -723,7 +786,7 @@ async function setStatus(id, ns){
   if (cur === ns) return toast("Already "+LBL[ns]);
   if (ns === "success" && !claimed) return toast("No user has claimed this order");
   if (ns === "open" && cur === "success") return toast("A successful order cannot be released");
-  const msg = ns === "success" ? "Mark SUCCESS? This adds "+fmt(o.amount)+" BDT + "+fmt(Math.round(o.amount*o.rate)/100)+" BDT reward to the user's balance (only once)."
+  const msg = ns === "success" ? "Mark SUCCESS? This adds "+fmt(o.amount)+" BDT + "+fmt(Math.round(o.amount*o.rate)/100)+" BDT reward to the user's balance (only once). Referral commission is also paid to the uplines automatically (see Refer program)."
     : ns === "open" ? "Release this order back to the pool? The user's claim will be removed."
     : "Change status to "+LBL[ns]+"?"+(cur === "success" ? " The balance already added to the user stays (adjust it in Users if needed)." : "");
   if (!confirm(msg)) { render(); return; }
@@ -959,7 +1022,7 @@ async function userHistory(id){
       rows.sort((a,b)=>tms(b.createdAt)-tms(a.createdAt));
     }
   } catch(e) { $("#uh_b").textContent = "Could not load: "+(e.code||e.message); return; }
-  const lab = l => l.kind==="signup_bonus" ? "Sign up bonus" : l.kind==="transfer_out" ? "Transfer sent" : l.kind==="transfer_in" ? "Transfer received" : l.kind==="redeem" ? "Redeem code ("+(l.code||"")+")" : l.kind==="withdraw" ? "Sell / Withdraw" : l.kind==="withdraw_refund" ? "Withdraw refund" : l.kind==="adjust" ? (l.reason||"Balance adjustment") : l.kind==="reward" ? "Task reward" : "Order amount";
+  const lab = l => l.kind==="signup_bonus" ? "Sign up bonus" : l.kind==="transfer_out" ? "Transfer sent" : l.kind==="transfer_in" ? "Transfer received" : l.kind==="redeem" ? "Redeem code ("+(l.code||"")+")" : l.kind==="withdraw" ? "Sell / Withdraw" : l.kind==="withdraw_refund" ? "Withdraw refund" : l.kind==="adjust" ? (l.reason||"Balance adjustment") : l.kind==="referral" ? "Referral commission ("+(l.levelName||"")+")" : l.kind==="reward" ? "Task reward" : "Order amount";
   const row = l => { const deb = (l.kind==="adjust" && l.direction==="debit") || l.kind==="withdraw" || l.kind==="transfer_out"; return `<div style="padding:9px 0;border-bottom:1px solid var(--line);font-size:14px;display:flex;gap:10px"><div style="flex:1"><b>${esc(lab(l))}</b>${l.note ? `<div>${esc(l.note)}</div>` : ""}<div style="color:var(--mute);font-size:12px">${esc(fdt(tms(l.createdAt)))}${l.by ? " · by "+esc(l.by) : ""}${l.balanceAfter!=null ? " · balance after "+fmt(l.balanceAfter) : ""}</div></div><b style="color:${deb?"var(--red)":"var(--g)"}">${deb?"−":"+"}${fmt(l.amount)}</b></div>`; };
   const log = (u.statusLog||[]).slice().sort((a,b)=>b.at-a.at).map(e=>`<div style="padding:7px 0;border-bottom:1px solid var(--line);font-size:13px"><span class="tag ${ACC_TC[e.status]||""}">${esc(ACC[e.status]||e.status)}</span> ${esc(e.note||"")}<div style="color:var(--mute);font-size:12px">${esc(fdt(e.at))} · ${esc(e.by||"")}</div></div>`).join("");
   $("#uh_b").style.color = "inherit";
@@ -1003,6 +1066,9 @@ document.addEventListener("click", async e=>{
     const prev = S.reasons.slice(); S.reasons.push({ id:"r_"+Date.now().toString(36), label, type });
     try { await saveReasons(); render(); toast("Reason added"); } catch(e) { S.reasons = prev; render(); toast("Failed: "+(e.code||e.message)); }
   }
+  else if ("saveref" in d) { const c = collectRef(); await saveRef(c, "Refer program saved"); }
+  else if ("addlv" in d) { const c = collectRef(); if (c.levels.length >= 10) return toast("Maximum 10 levels"); c.levels.push({ pct:0, on:true }); await saveRef(c, lvName(c.levels.length-1)+" added. Set its % and save."); }
+  else if ("rfdel" in d) { const c = collectRef(); if (c.levels.length < 2) return; if (!confirm("Remove "+lvName(c.levels.length-1)+"? Past commissions stay in history.")) return; c.levels.pop(); await saveRef(c, "Level removed"); }
   else if ("dotransfer" in d) doTransfer();
   else if ("ttab" in d) { S.ttab = d.ttab; S.tfs = ""; render(); }
   else if ("tfgo" in d) { S.tf.tq = d.tfgo; S.ttab = "new"; render(); scrollTo(0,0); }
@@ -1090,6 +1156,8 @@ document.addEventListener("click", async e=>{
   }
   else if ("logout" in d) { unsubs.forEach(u=>u()); unsubs=[]; if(!DEMO) await fb.signOut(auth); S.admin=false; render(); }
 });
+
+document.addEventListener("change", e => { const el = e.target; if (el && el.dataset && el.dataset.rf === "on") { const sp = el.parentElement.querySelector("span"); if (sp) sp.textContent = el.checked ? "On" : "Off"; } });
 
 render();
 </script>
