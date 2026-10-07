@@ -129,6 +129,7 @@ const REF_DEF = { enabled:true, levels:[{pct:0.3,on:true},{pct:0.2,on:true},{pct
 const refCfg = () => { const c = S.refCfg; return c && Array.isArray(c.levels) && c.levels.length ? { enabled:c.enabled!==false, levels:c.levels.map(l=>({ pct:Number(l.pct)||0, on:l.on!==false })), activeTasks:Number(c.activeTasks)||30, activeBonus:c.activeBonus==null ? 100 : Math.max(0, Number(c.activeBonus)||0) } : JSON.parse(JSON.stringify(REF_DEF)); };
 const lvName = i => String.fromCharCode(65+i)+" level";
 const round2 = n => Math.round(Number(n||0) * 100) / 100;
+const maskId = m => { m = String(m||""); return (m.includes("*") || m.length <= 8) ? m : m.slice(0,3)+"***"+m.slice(-4); };   /* task cards show a short masked ID, e.g. 179***PjPuI */
 const maskName = (ph, em) => (ph && ph.length >= 8) ? ph.slice(0,4) + "****" + ph.slice(-3) : ((em || "user").split("@")[0].slice(0,2) + "***");
 /* Withdraw (sell) order ID: automatic short ID like WD123456. A buy task can be linked to it. */
 const sNo = o => o.orderNo || String(o.id).slice(0,8).toUpperCase();
@@ -144,14 +145,16 @@ window.owdFind = v => {
   const el = $("#owd_res"); if (!el) return;
   const q = String(v||"").trim(); const bk = $("#ob"), ng = $("#on");
   const lock = !!q; [bk, ng].forEach(i => { if (i) i.disabled = false; });
-  if (!q) { el.innerHTML = ""; return; }
+  const om = $("#om"), clearMask = () => { if (om && om.dataset.auto === "1") { om.value = ""; om.dataset.auto = ""; } };
+  if (!q) { clearMask(); el.innerHTML = ""; return; }
   const o = findSell(q);
-  if (!o) { el.innerHTML = `<div style="margin-top:6px;font-size:13px;color:var(--red)">No order found with this ID.</div>`; return; }
-  if (o.status==="success" || o.status==="failed") { el.innerHTML = `<div style="margin-top:6px;font-size:13px;color:var(--red)">This withdraw is already ${esc(SL[o.status]||o.status)}.</div>`; return; }
+  if (!o) { clearMask(); el.innerHTML = `<div style="margin-top:6px;font-size:13px;color:var(--red)">No order found with this ID.</div>`; return; }
+  if (o.status==="success" || o.status==="failed") { clearMask(); el.innerHTML = `<div style="margin-top:6px;font-size:13px;color:var(--red)">This withdraw is already ${esc(SL[o.status]||o.status)}.</div>`; return; }
   const rem = sellRemain(o);
   if (bk) { bk.value = o.method==="bkash" ? o.number : ""; bk.disabled = lock; }
   if (ng) { ng.value = o.method==="nagad" ? o.number : ""; ng.disabled = lock; }
   const oa = $("#oa"); if (oa && rem >= 100) oa.value = rem;
+  if (om) { om.value = maskId(sNo(o)); om.dataset.auto = "1"; }   /* Buyer mask = short masked Order ID */
   el.innerHTML = `<div style="margin-top:6px;font-size:13px;color:#0b7a55">✓ <b>${esc(sNo(o))}</b> · ${esc(userLabel(o.userId))}<br>${fmt(o.amount)} BDT via ${esc(payName(o.method))} ${esc(o.number)}</div><div style="font-size:12px;color:var(--mute)">Already linked to tasks: ${fmt(sellLinked(o))} · Remaining: ${fmt(rem)} BDT. The task will pay this number, and this user will not see the task.</div>`;
 };
 const RT = { credit:"Add balance", debit:"Cut balance", both:"Add & Cut" };
@@ -219,7 +222,7 @@ const lastNum = k => { try { return localStorage.getItem("nerivo_"+k) || ""; } c
 const userLabel = uid => { const u = S.users.find(x=>x.id===uid); return u ? (uName(u) || uid.slice(0,6)) + " · ref " + (u.code || "-") + (u.lastIp ? " · IP " + u.lastIp : "") : (uid ? uid.slice(0,6)+"..." : "-"); };
 function oList(){
   const q = S.oq.trim().toLowerCase();
-  return S.orders.filter(o => (S.of==="all" || OS(o)===S.of) && (!q || [o.amount,o.trxId,o.senderNumber,o.payMethod,o.bkashNumber,o.nagadNumber,o.mask,o.sellOrderNo,userLabel(o.claimedBy)].join(" ").toLowerCase().includes(q)));
+  return S.orders.filter(o => (S.of==="all" || OS(o)===S.of) && (!q || [o.amount,o.trxId,o.senderNumber,o.payMethod,o.bkashNumber,o.nagadNumber,o.mask,maskId(o.mask),String(o.id).slice(0,8),o.sellOrderNo,userLabel(o.claimedBy)].join(" ").toLowerCase().includes(q)));
 }
 function orderRows(){
   if (!S.orders.length) return `<tr><td colspan="7" style="color:var(--mute)">No orders yet. Create the first one above.</td></tr>`;
@@ -259,7 +262,7 @@ function orders(){
   <div><label>Amount (BDT)</label><input id="oa" type="number" min="100" value="111"></div>
   <div><label>bKash number (user sends money here)</label>${wsel("bkash","ob")}<input id="ob" type="tel" placeholder="01XXXXXXXXX" value=""></div>
   <div><label>Nagad number (user sends money here)</label>${wsel("nagad","on")}<input id="on" type="tel" placeholder="01XXXXXXXXX" value=""></div>
-  <div><label>Buyer mask</label><input id="om" placeholder="179***7kPO"></div>
+  <div><label>Buyer mask</label><input id="om" placeholder="179***7kPO" oninput="this.dataset.auto=''"></div>
   <div><label>Reward rate %</label><input id="orr" type="number" step="0.1" value="3"></div>
   <button data-addorder>Create order</button></div></div>
   ${walletBox()}
@@ -270,7 +273,7 @@ function orders(){
 
 function sList(){
   const q = S.sq.trim().toLowerCase();
-  return S.sells.filter(o => (S.sf==="all" || o.status===S.sf) && (!q || [o.amount,o.method,o.number,sNo(o),userLabel(o.userId)].join(" ").toLowerCase().includes(q)));
+  return S.sells.filter(o => (S.sf==="all" || o.status===S.sf) && (!q || [o.amount,o.method,o.number,sNo(o),maskId(sNo(o)),userLabel(o.userId)].join(" ").toLowerCase().includes(q)));
 }
 function sellRows(){
   if (!S.sells.length) return `<tr><td colspan="6" style="color:var(--mute)">No sell requests yet. They appear here when a user sells (withdraws) balance.</td></tr>`;
@@ -770,7 +773,7 @@ async function addOrder(){
   const bk = sell ? (sell.method==="bkash" ? sell.number : "") : $("#ob").value.trim(), ng = sell ? (sell.method==="nagad" ? sell.number : "") : $("#on").value.trim(), okn = n => /^01\d{9}$/.test(n);
   if ((bk && !okn(bk)) || (ng && !okn(ng))) return toast("Numbers must be 11 digits starting with 01");
   if (!bk && !ng) return toast("Enter a bKash or Nagad number");
-  const o = { amount:Number($("#oa").value), type: bk && ng ? "both" : (bk ? "bkash" : "nagad"), bkashNumber:bk, nagadNumber:ng, mask:$("#om").value.trim()||"179***"+Math.random().toString(36).slice(2,6), rate:Number($("#orr").value), cancels:0, status:"open", ...(sell ? { sellOrderId:sell.id, sellOrderNo:sNo(sell), sellerId:sell.userId } : {}) };
+  const o = { amount:Number($("#oa").value), type: bk && ng ? "both" : (bk ? "bkash" : "nagad"), bkashNumber:bk, nagadNumber:ng, mask:$("#om").value.trim()||(sell ? maskId(sNo(sell)) : "179***"+Math.random().toString(36).slice(2,6)), rate:Number($("#orr").value), cancels:0, status:"open", ...(sell ? { sellOrderId:sell.id, sellOrderNo:sNo(sell), sellerId:sell.userId } : {}) };
   if (!(o.amount>=100)) return toast("Amount must be 100 or more");
   if (sell && o.amount > sellRemain(sell)) return toast("Amount is more than the remaining withdraw amount ("+fmt(sellRemain(sell))+" BDT)");
   try {
