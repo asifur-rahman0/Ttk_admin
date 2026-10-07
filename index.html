@@ -718,8 +718,128 @@ function settings(){
   <table style="margin-top:12px"><thead><tr><th></th><th>Name</th><th>Link</th><th></th></tr></thead><tbody>${supRows() || `<tr><td colspan="4" style="color:var(--mute)">No support links yet.</td></tr>`}</tbody></table></div>
   <div class="box" style="max-width:720px"><h3 style="margin-bottom:6px">Tutorial videos</h3><p style="font-size:13px;color:var(--mute)">These show on the user's Home page under Tutorials. Paste a YouTube link (plays inside the app) or a direct .mp4 link. Other links open in a new tab. If the list is empty the Tutorials section is hidden.</p>
   <div class="form" style="margin-top:8px"><div><label>Title</label><input id="tt" placeholder="e.g. How to buy USDT"></div><div><label>Short note (optional)</label><input id="ts" placeholder="e.g. 2 min video"></div><div style="grid-column:span 2"><label>Video link</label><input id="tl" type="url" placeholder="https://youtu.be/..."></div><button data-addtut>Add video</button></div>
-  <table style="margin-top:12px"><thead><tr><th>#</th><th>Title</th><th>Link</th><th></th></tr></thead><tbody>${tutRows() || `<tr><td colspan="4" style="color:var(--mute)">No tutorial videos yet.</td></tr>`}</tbody></table></div>`;
+  <table style="margin-top:12px"><thead><tr><th>#</th><th>Title</th><th>Link</th><th></th></tr></thead><tbody>${tutRows() || `<tr><td colspan="4" style="color:var(--mute)">No tutorial videos yet.</td></tr>`}</tbody></table></div>
+  <div class="box" style="max-width:720px"><h3 style="margin-bottom:6px">Backup &amp; Restore</h3><p style="font-size:13px;color:var(--mute);line-height:1.5">Backup saves all data (users' balances and history, team, wallets, buy orders, withdraw orders, transfers, redeem codes and settings) into one <b>.json</b> file on this phone/computer. Restore reads that file and brings everything back. User accounts (login) are never touched.</p>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px"><button data-bkdl>Download backup</button><button class="out" data-bkrs>Restore from backup file</button></div>
+  <input type="file" id="bk_file" accept=".json,application/json" style="display:none" onchange="window.bkPick(this)"></div>
+  <div class="box" style="max-width:720px;border-color:#f3b4ae"><h3 style="margin-bottom:6px;color:var(--red)">Delete all data</h3><p style="font-size:13px;color:var(--mute);line-height:1.5">Resets the app to zero for admin and users: all balances, income, history, team progress, buy orders, withdraw orders, transfers, redeem codes and redeem history are removed. <b>Kept:</b> user accounts (login, phone, referral code and who referred them), wallet numbers and all settings. A backup file is downloaded automatically before anything is deleted, so you can restore it later.</p>
+  <button class="red" style="margin-top:10px" data-wipe>Delete all data</button></div>`;
 }
+
+/* ---------- Backup / Restore / Delete all data ---------- */
+const BK_FIELDS = ["balance","income","saleAmount","saleOrders","purchaseAmount","purchaseOrders","refIncome","taskDone","taskAmount","refActive","refActiveAt","refBonusPaid","statsDate"];   /* money / progress fields on a user document */
+const BK_SUBS = ["ledger","redeems","team","wallets"];                                   /* per-user sub collections */
+const BK_TOP = ["buyOrders","sellOrders","transfers","redeemCodes","settings"];          /* top level collections */
+const bkEnc = v => { if (v === null || typeof v !== "object") return v;
+  if (typeof v.toMillis === "function" && "seconds" in v) return { __ts:[v.seconds, v.nanoseconds] };
+  if (Array.isArray(v)) return v.map(bkEnc);
+  const o = {}; Object.keys(v).forEach(k => { if (v[k] !== undefined) o[k] = bkEnc(v[k]); }); return o; };
+const bkDec = v => { if (v === null || typeof v !== "object") return v;
+  if (Array.isArray(v)) return v.map(bkDec);
+  if (Array.isArray(v.__ts)) return new fb.Timestamp(v.__ts[0], v.__ts[1]);
+  const o = {}; Object.keys(v).forEach(k => o[k] = bkDec(v[k])); return o; };
+async function pool(items, n, fn){ let i = 0; await Promise.all(Array.from({length:Math.min(n, items.length)}, async () => { while (i < items.length) { const x = items[i++]; await fn(x); } })); }
+function bkProg(title){
+  const m = modal(`<h2>${esc(title)}</h2><p id="bk_p" style="margin:12px 0;font-size:14px;line-height:1.6;white-space:pre-line">Starting...</p><button class="sm" id="bk_x" style="display:none" onclick="this.closest('.modal').remove()">Close</button>`);
+  const p = m.querySelector("#bk_p"), x = m.querySelector("#bk_x");
+  return { say:t => { p.textContent = t; }, done:t => { p.textContent = t; x.style.display = ""; }, fail:t => { p.textContent = "✗ Failed: " + t; x.style.display = ""; } };
+}
+const bkSummary = d => { const u = Object.values(d.users||{}), t = c => ((d.top||{})[c]||[]).length, sum = s => u.reduce((a,x) => a + (((x.sub||{})[s])||[]).length, 0);
+  return "Users: "+u.length+"\nBuy orders: "+t("buyOrders")+" · Withdraw orders: "+t("sellOrders")+" · Transfers: "+t("transfers")+"\nRedeem codes: "+t("redeemCodes")+" · History entries: "+sum("ledger"); };
+async function bkCollect(say){
+  const data = { app:"nova-pay-backup", version:1, createdAt:new Date().toISOString(), by:adminEmail(), top:{}, users:{} };
+  for (const c of BK_TOP) { say("Reading "+c+"..."); const q = await fb.getDocs(fb.collection(db,c)); data.top[c] = q.docs.map(d => ({ id:d.id, data:bkEnc(d.data()) })); }
+  const us = await fb.getDocs(fb.collection(db,"users")); let i = 0;
+  await pool(us.docs, 12, async ud => {
+    const rec = { id:ud.id, data:bkEnc(ud.data()), sub:{} };
+    for (const s of BK_SUBS) { const q = await fb.getDocs(fb.collection(db,"users",ud.id,s)); rec.sub[s] = q.docs.map(d => ({ id:d.id, data:bkEnc(d.data()) })); }
+    data.users[ud.id] = rec; say("Reading users "+(++i)+" / "+us.size);
+  });
+  return data;
+}
+function bkDownload(data){
+  const name = "novapay-backup-" + new Date().toISOString().slice(0,19).replace(/[:T]/g,"-") + ".json";
+  const url = URL.createObjectURL(new Blob([JSON.stringify(data)], { type:"application/json" }));
+  const a = document.createElement("a"); a.href = url; a.download = name; document.body.append(a); a.click();
+  setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 5000); return name;
+}
+async function delDocs(refs, say, label){
+  for (let i = 0; i < refs.length; i += 400) { const b = fb.writeBatch(db); refs.slice(i, i+400).forEach(r => b.delete(r)); await b.commit(); if (label) say(label+" "+Math.min(i+400, refs.length)+" / "+refs.length); }
+}
+async function writeDocs(items, say, label){
+  let fails = 0;
+  for (let i = 0; i < items.length; i += 300) {
+    const part = items.slice(i, i+300);
+    try { const b = fb.writeBatch(db); part.forEach(x => b.set(x.ref, x.data)); await b.commit(); }
+    catch (e) { for (const x of part) { try { await fb.setDoc(x.ref, x.data); } catch { fails++; } } }
+    if (label) say(label+" "+Math.min(i+300, items.length)+" / "+items.length);
+  }
+  return fails;
+}
+/* delete orders / transfers / codes / history; with zero=true also put every user's money and progress back to 0 (accounts stay) */
+async function bkWipe(say, zero){
+  for (const c of ["buyOrders","sellOrders","transfers","redeemCodes"]) { say("Deleting "+c+"..."); const q = await fb.getDocs(fb.collection(db,c)); await delDocs(q.docs.map(d => d.ref), say, "Deleting "+c); }
+  const us = await fb.getDocs(fb.collection(db,"users")); let i = 0;
+  await pool(us.docs, 8, async ud => {
+    for (const s of ["ledger","redeems"]) { const q = await fb.getDocs(fb.collection(db,"users",ud.id,s)); await delDocs(q.docs.map(d => d.ref)); }
+    if (zero) {
+      const tq = await fb.getDocs(fb.collection(db,"users",ud.id,"team"));
+      for (let k = 0; k < tq.docs.length; k += 400) { const b = fb.writeBatch(db); tq.docs.slice(k, k+400).forEach(d => b.update(d.ref, { tasks:0, amount:0, active:false })); await b.commit(); }
+      const wq = await fb.getDocs(fb.collection(db,"users",ud.id,"wallets"));
+      for (let k = 0; k < wq.docs.length; k += 400) { const b = fb.writeBatch(db); wq.docs.slice(k, k+400).forEach(d => b.update(d.ref, { balance:0 })); await b.commit(); }
+      await fb.updateDoc(ud.ref, { balance:0, income:0, saleAmount:0, saleOrders:0, purchaseAmount:0, purchaseOrders:0, refIncome:0, taskDone:0, taskAmount:0, refBonusPaid:0, refActive:fb.deleteField(), refActiveAt:fb.deleteField(), statsDate:fb.deleteField() });
+    }
+    say((zero ? "Resetting users " : "Clearing users ")+(++i)+" / "+us.size);
+  });
+}
+async function bkRestore(data, say){
+  let fails = 0;
+  await bkWipe(say, false);
+  for (const c of BK_TOP) { const items = (data.top[c]||[]).map(x => ({ ref:fb.doc(db,c,x.id), data:bkDec(x.data) })); if (items.length) fails += await writeDocs(items, say, "Restoring "+c); }
+  const us = await fb.getDocs(fb.collection(db,"users")), have = new Set(us.docs.map(d => d.id));
+  const recs = Object.values(data.users).filter(r => have.has(r.id)), skipped = Object.keys(data.users).length - recs.length; let i = 0;
+  await pool(recs, 8, async r => {
+    const upd = {}; BK_FIELDS.forEach(f => { upd[f] = (r.data && r.data[f] !== undefined) ? bkDec(r.data[f]) : fb.deleteField(); });
+    try { await fb.updateDoc(fb.doc(db,"users",r.id), upd); } catch { fails++; }
+    for (const s of BK_SUBS) { const items = (((r.sub||{})[s])||[]).map(x => ({ ref:fb.doc(db,"users",r.id,s,x.id), data:bkDec(x.data) })); if (items.length) fails += await writeDocs(items); }
+    say("Restoring users "+(++i)+" / "+recs.length);
+  });
+  return { fails, skipped };
+}
+async function bkBackupClick(){
+  if (DEMO) return toast("Backup is not available in demo mode");
+  const m = bkProg("Creating backup");
+  try { const data = await bkCollect(m.say); const name = bkDownload(data); m.done("✓ Backup downloaded:\n"+name+"\n\n"+bkSummary(data)+"\n\nFind it in your phone's Downloads folder (File Manager)."); }
+  catch (e) { console.error(e); m.fail(e.code || e.message); }
+}
+function bkWipeModal(){
+  if (DEMO) return toast("Not available in demo mode");
+  modal(`<h2 style="color:var(--red)">Delete all data?</h2><p style="font-size:14px;line-height:1.6;margin:10px 0">This sets everything to zero for admin and users: balances, income, history, team progress, buy orders, withdraw orders, transfers and redeem codes.<br><br><b>Kept:</b> user accounts, wallet numbers and settings.<br>A backup file is downloaded first. If the backup fails, nothing is deleted.</p><label>Type DELETE to continue</label><input id="bk_c" autocomplete="off" placeholder="DELETE"><div style="display:flex;gap:8px;margin-top:14px"><button class="sm red" onclick="window.bkGoWipe(this)">Backup &amp; delete all</button><button class="sm out" onclick="this.closest('.modal').remove()">Cancel</button></div>`);
+}
+window.bkGoWipe = async btn => {
+  const m0 = btn.closest(".modal"); if (m0.querySelector("#bk_c").value.trim() !== "DELETE") return toast("Type DELETE exactly");
+  m0.remove(); const m = bkProg("Deleting all data");
+  let name;
+  try { const data = await bkCollect(t => m.say("Step 1/2: saving backup\n"+t)); name = bkDownload(data); }
+  catch (e) { console.error(e); return m.fail("Backup failed, nothing was deleted. ("+(e.code || e.message)+")"); }
+  try { await bkWipe(t => m.say("Step 2/2: deleting data\n"+t), true); m.done("✓ All data deleted. User accounts are kept.\n\nBackup file: "+name+"\nKeep it safe. Use Settings → Restore to bring the data back."); }
+  catch (e) { console.error(e); m.fail((e.code || e.message)+"\nSome data may already be deleted. Your backup file ("+name+") is saved, use Restore to put everything back."); }
+};
+let BK_PENDING = null;
+window.bkPick = async inp => {
+  const f = inp.files && inp.files[0]; inp.value = ""; if (!f) return;
+  let data; try { data = JSON.parse(await f.text()); } catch { return toast("This is not a valid backup file"); }
+  if (!data || data.app !== "nova-pay-backup" || !data.top || !data.users) return toast("This is not a Nova Pay backup file");
+  BK_PENDING = data;
+  modal(`<h2>Restore this backup?</h2><p style="font-size:14px;line-height:1.6;margin:10px 0">Backup date: <b>${esc(fdt(Date.parse(data.createdAt)))}</b><br><span style="white-space:pre-line">${esc(bkSummary(data))}</span></p><p style="font-size:13px;color:var(--red);line-height:1.5">Current buy orders, withdraw orders, transfers, redeem codes and history are deleted first, then the data from this file is loaded. Balances and progress of users go back to the backup values. User accounts stay as they are. Download a fresh backup first if you may need today's data.</p><label>Type RESTORE to continue</label><input id="bk_c" autocomplete="off" placeholder="RESTORE"><div style="display:flex;gap:8px;margin-top:14px"><button class="sm red" onclick="window.bkGoRestore(this)">Restore now</button><button class="sm out" onclick="this.closest('.modal').remove()">Cancel</button></div>`);
+};
+window.bkGoRestore = async btn => {
+  const m0 = btn.closest(".modal"); if (m0.querySelector("#bk_c").value.trim() !== "RESTORE") return toast("Type RESTORE exactly");
+  m0.remove(); const m = bkProg("Restoring backup"), data = BK_PENDING; if (!data) return m.fail("No file loaded");
+  try { const r = await bkRestore(data, m.say); m.done("✓ Restore finished."+(r.skipped ? "\n"+r.skipped+" account(s) in the file no longer exist and were skipped." : "")+(r.fails ? "\n⚠ "+r.fails+" item(s) could not be written. Check that the latest Firestore rules are published, then run Restore again." : "")); }
+  catch (e) { console.error(e); m.fail((e.code || e.message)+"\nYou can run Restore again with the same file."); }
+  BK_PENDING = null;
+};
 
 const navSnap = () => ({ t:S.tab, tt:S.tab==="transfer" ? S.ttab : null });
 function navApply(nv){ S.tab = nv.t; if (nv.tt) S.ttab = nv.tt; render(); }
@@ -1309,6 +1429,9 @@ document.addEventListener("click", async e=>{
   }
   else if ("rmw" in d) removeUserWallet(d.rmw);
   else if ("wbfill" in d) backfillWalletKeys();
+  else if ("bkdl" in d) bkBackupClick();
+  else if ("bkrs" in d) { if (DEMO) return toast("Not available in demo mode"); $("#bk_file").click(); }
+  else if ("wipe" in d) bkWipeModal();
   else if ("addrc" in d) createRC();
   else if ("rccopy" in d) copyOrShow(d.rccopy, "Copied: "+d.rccopy);
   else if ("rctoggle" in d) {
