@@ -39,7 +39,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}
 th,td{text-align:left;padding:9px 9px;border-bottom:1px solid var(--line);white-space:nowrap}
 th{color:var(--mute);font-weight:700;font-size:12px;background:var(--mint)}th:first-child{border-radius:9px 0 0 9px}th:last-child{border-radius:0 9px 9px 0}
 tbody tr:hover td{background:#f5fbff}
-.tag{padding:3px 10px;border-radius:12px;font-size:11.5px;font-weight:700;background:#e2f6ec;color:#0b7a55}.tag.x{background:#fde8e6;color:var(--red)}.tag.cr{background:#fff3d6;color:#8a5a00}.tag.lk{background:#ece6f7;color:#5a3d99}.tag.fz{background:#dcefff;color:#0b5394}
+.tag{padding:3px 10px;border-radius:12px;font-size:11.5px;font-weight:700;background:#e2f6ec;color:#0b7a55}.tag.x{background:#fde8e6;color:var(--red)}.tag.cr{background:#fff3d6;color:#8a5a00}.tag.lk{background:#ece6f7;color:#5a3d99}.tag.fz{background:#dcefff;color:#0b5394}.tag.off{background:#eef0f3;color:var(--mute);font-weight:600}.dot{width:12px;height:12px;border-radius:50%;background:#1fbf75;box-shadow:0 0 0 0 rgba(31,191,117,.6);animation:pls 1.8s infinite;display:inline-block}@keyframes pls{70%{box-shadow:0 0 0 9px rgba(31,191,117,0)}100%{box-shadow:0 0 0 0 rgba(31,191,117,0)}}.onl{display:flex;align-items:center;gap:22px;flex-wrap:wrap}.onl .it small{display:block;color:var(--mute);font-size:12px;font-weight:600}.onl .it b{font-family:var(--display);font-size:20px;color:var(--gd)}
 .form{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px;align-items:end}
 .login{max-width:340px;margin:12vh auto;background:#fff;padding:24px 20px;border-radius:24px;border:1px solid var(--line);box-shadow:0 26px 50px -26px rgba(15,111,208,.55)}
 .login h1{font-size:26px;color:var(--g)}
@@ -87,7 +87,7 @@ if (!DEMO) try {
 const $ = s => document.querySelector(s);
 const fmt = n => Number(n || 0).toFixed(2);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const S = { admin:false, tab:"dash", users:[], orders:[], rates:{usdt:130.34,bonus:3}, err:"", of:"all", oq:"", wl:{bkash:[],nagad:[]}, sells:[], sf:"all", sq:"", sellForm:{u:"",a:"",m:"bkash",n:"",q:""}, swl:null };
+const S = { admin:false, tab:"dash", users:[], orders:[], rates:{usdt:130.34,bonus:3}, err:"", of:"all", oq:"", wl:{bkash:[],nagad:[]}, sells:[], sf:"all", sq:"", sellForm:{u:"",a:"",m:"bkash",n:"",q:""}, swl:null, nu:{p:"today",q:"",lv:0,st:"active"} };
 let unsubs = [];
 /* Order status: open -> created (user claimed + picked wallet) -> success / failed / lock (admin decides). Old names are mapped. */
 const NS = s => ({reserved:"created",done:"success",claimed:"success",rejected:"failed"})[s] || s;
@@ -109,6 +109,24 @@ async function saveW(){
 loadW();
 window.pickNum = (id,v) => { if (v) { const el = $("#"+id); if (el) el.value = v; } };
 const fdt = ms => ms ? new Date(ms).toLocaleString() : "-";
+/* ---------- Online / last seen (user app writes lastSeenAt about every 60 seconds while open) ---------- */
+const ONLINE_MS = 150000;   /* online = seen in the last 2.5 minutes */
+const seenMs = u => tms(u.lastSeenAt);
+const isOnline = u => { const t = seenMs(u); return !!t && Date.now() - t < ONLINE_MS; };
+const agoTxt = ms => { const d = Math.max(0, Date.now() - ms), m = Math.floor(d/60000);
+  return d < 60000 ? "just now" : m < 60 ? m+" min ago" : m < 1440 ? Math.floor(m/60)+" hr ago" : m < 10080 ? Math.floor(m/1440)+" day"+(Math.floor(m/1440)>1?"s":"")+" ago" : fdt(ms); };
+const presHtml = u => isOnline(u) ? `<span class="tag">● Online</span>` : (seenMs(u) ? `<span class="tag off" title="${esc(fdt(seenMs(u)))}">Last seen ${esc(agoTxt(seenMs(u)))}</span>` : `<span class="tag off">Never seen</span>`);
+const presCell = u => `<span data-pres="${esc(u.id)}">${presHtml(u)}</span>`;
+function onlineStats(){
+  const live = S.users.filter(u=>uStatus(u)!=="deleted"), now = Date.now(), ds = new Date().setHours(0,0,0,0);
+  const seen = u => seenMs(u);
+  return { on:live.filter(isOnline).length, h:live.filter(u=>seen(u) && now-seen(u) < 60000).length, d:live.filter(u=>seen(u) >= ds).length, all:live.length };
+}
+function refreshPresence(){
+  const m = new Map(S.users.map(u=>[u.id,u]));
+  document.querySelectorAll("[data-pres]").forEach(el=>{ const u = m.get(el.dataset.pres); if(u) el.innerHTML = presHtml(u); });
+  if($("#onl_n")){ const o = onlineStats(); $("#onl_n").textContent = o.on; $("#onl_h").textContent = o.h; $("#onl_d").textContent = o.d; }
+}
 /* Account status + balance reasons */
 const ACC = { active:"Active", banned:"Banned", suspended:"Suspended", frozen:"Frozen", locked:"Locked", deleted:"Deleted" };
 const ACC_TC = { deleted:"x", banned:"x", suspended:"cr", frozen:"fz", locked:"lk" };
@@ -163,7 +181,7 @@ const adminEmail = () => (auth?.currentUser?.email) || "admin";
 const toast = m => { const t=document.createElement("div"); t.className="toast"; t.textContent=m; document.body.append(t); setTimeout(()=>t.remove(),2200); };
 
 if (DEMO) {
-  S.users = [{id:"u1",phone:"+8801840000059",email:"demo@novapay.app",balance:13.63,income:1245.46,saleAmount:45222,saleOrders:39,purchaseAmount:0,purchaseOrders:0,code:"WcLvJ8"}];
+  S.users = [{id:"u1",lastSeenAt:Date.now()-30000,phone:"+8801840000059",email:"demo@novapay.app",balance:13.63,income:1245.46,saleAmount:45222,saleOrders:39,purchaseAmount:0,purchaseOrders:0,code:"WcLvJ8"}];
   S.orders = [{id:"a",amount:111,type:"bkash",mask:"179***7kPO",rate:3,cancels:0,status:"open"},{id:"b",amount:110,type:"nagad",mask:"179***q0HO",rate:3,cancels:0,status:"claimed"}];
 }
 
@@ -201,7 +219,9 @@ function dash(){
       + c("Buy orders created",amt(bc),bc.length+" order"+(bc.length===1?"":"s"))
       + c("New users",nu.length);
   };
+  const ol = onlineStats();
   return `<h1>Dashboard</h1>
+  <div class="box onl" style="margin:6px 0 14px"><div style="display:flex;align-items:center;gap:10px"><span class="dot"></span><div class="it"><small>Online now</small><b id="onl_n" style="font-size:28px">${ol.on}</b></div></div><div class="it"><small>Online last 1 min</small><b id="onl_h">${ol.h}</b></div><div class="it"><small>Active today</small><b id="onl_d">${ol.d}</b></div><div class="it"><small>Total users</small><b>${ol.all}</b></div><div style="font-size:12px;color:var(--mute)">Online = active in the last 2 minutes</div></div>
   <h3 style="margin:2px 0 8px">Today</h3><div class="cards">${block(true)}</div>
   <h3 style="margin:18px 0 8px">Total (all time)</h3><div class="cards">${block(false)}</div>
   <h3 style="margin:18px 0 8px">Overview</h3><div class="cards">${c("Users",live.length)}${c("Total user balance",fmt(sum("balance"))+" BDT")}${c("Total income paid",fmt(sum("income"))+" BDT")}${c("Sale amount",fmt(sum("saleAmount"))+" BDT")}${c("Open orders",n("open"))}${c("Order Create",n("created"))}${c("Pending",n("pending"))}${c("Failed",n("failed"))}${c("Lock",n("lock"))}${c("Withdraw pending",sn("processing"))}${c("Withdraw lock",sn("lock"))}${c("Withdraw failed",sn("failed"))}</div>`;
@@ -210,12 +230,51 @@ function dash(){
 function users(){
   return `<h1>Users</h1><div class="box"><input id="q" placeholder="Search by phone, email or code" style="max-width:320px;margin-bottom:12px" oninput="window.filterUsers(this.value)">
   <label style="display:flex;align-items:center;gap:8px;font-size:14px;margin-bottom:12px"><input type="checkbox" style="width:auto" ${S.showDel?"checked":""} onchange="window.toggleDel(this.checked)"> Show deleted accounts</label>
-  <table><thead><tr><th>Phone</th><th>Code</th><th>Referred by</th><th>Last IP</th><th>Balance</th><th>Income</th><th>Status</th><th></th></tr></thead><tbody id="ub">${userRows(visU())}</tbody></table></div>`;
+  <table><thead><tr><th>Phone</th><th>Code</th><th>Referred by</th><th>Last IP</th><th>Balance</th><th>Income</th><th>Online</th><th>Status</th><th></th></tr></thead><tbody id="ub">${userRows(visU())}</tbody></table></div>`;
 }
-const userRows = list => list.length ? list.map(u=>{ const refCode = u.referredBy ? (S.users.find(x=>x.id===u.referredBy)?.code || u.referredBy.slice(0,6)+"...") : "-"; return `<tr><td>${cp(uName(u))}</td><td>${cp(u.code)}</td><td>${esc(refCode)}</td><td>${esc(u.lastIp||"-")}</td><td>${fmt(u.balance)}</td><td>${fmt(u.income)}</td><td><span class="tag ${ACC_TC[uStatus(u)]||""}">${ACC[uStatus(u)]}</span></td><td style="white-space:nowrap"><button class="sm out" data-edit="${u.id}">Edit</button> <button class="sm" data-bal="${u.id}">Balance</button> <button class="sm out" data-acct="${u.id}">Account</button> <button class="sm out" data-uhist="${u.id}">History</button></td></tr>`; }).join("") : `<tr><td colspan="8" style="color:var(--mute)">No users found.</td></tr>`;
+const userRows = list => list.length ? list.map(u=>{ const refCode = u.referredBy ? (S.users.find(x=>x.id===u.referredBy)?.code || u.referredBy.slice(0,6)+"...") : "-"; return `<tr><td>${cp(uName(u))}</td><td>${cp(u.code)}</td><td>${esc(refCode)}</td><td>${esc(u.lastIp||"-")}</td><td>${fmt(u.balance)}</td><td>${fmt(u.income)}</td><td>${presCell(u)}</td><td><span class="tag ${ACC_TC[uStatus(u)]||""}">${ACC[uStatus(u)]}</span></td><td style="white-space:nowrap"><button class="sm out" data-edit="${u.id}">Edit</button> <button class="sm" data-bal="${u.id}">Balance</button> <button class="sm out" data-acct="${u.id}">Account</button> <button class="sm out" data-uhist="${u.id}">History</button></td></tr>`; }).join("") : `<tr><td colspan="9" style="color:var(--mute)">No users found.</td></tr>`;
 const visU = () => S.users.filter(u => S.showDel || uStatus(u) !== "deleted");
 window.toggleDel = v => { S.showDel = v; render(); };
 window.filterUsers = v => { v=v.toLowerCase(); $("#ub").innerHTML = userRows(visU().filter(u=>[u.phone,u.email,u.code,u.lastIp].join(" ").toLowerCase().includes(v))); };
+
+/* ---------- New users (Today / last 7 days, with team levels of a referral code) ---------- */
+const dhDay = () => Math.floor((Date.now() + 6*3600*1000) / 86400000) * 86400000 - 6*3600*1000;   /* 12:00 AM Bangladesh time */
+window.nuSet = (k, v) => { const f = S.nu; f[k] = v; if (k === "q") { f.lv = 0; f.st = "active"; } if (k === "p" || k === "lv") f.st = k === "lv" ? "active" : f.st; render(); };
+function newUsers(){
+  const f = S.nu, cfg = refCfg(), need = cfg.activeTasks, N = Math.max(3, cfg.levels.length);
+  const t0 = dhDay(), from = { today:t0, "7d":t0 - 6*86400000 };
+  const done = {}; S.orders.forEach(o => { if (o.claimedBy && OS(o) === "success") done[o.claimedBy] = (done[o.claimedBy]||0) + 1; });
+  const tasks = u => Math.max(done[u.id]||0, Number(u.taskDone)||0);
+  const isAct = u => u.refActive === true || tasks(u) >= need;
+  const pool = visU(), joined = u => tms(u.createdAt);
+  const inP = (u, p) => joined(u) >= from[p];
+  const q = f.q.trim().toLowerCase();
+  let ref = null, lvls = [];
+  if (q) {
+    ref = S.users.find(u => (u.code||"").toLowerCase() === q) || null;
+    if (ref) {
+      const kids = {}; S.users.forEach(u => { if (u.referredBy) (kids[u.referredBy] || (kids[u.referredBy] = [])).push(u); });
+      let cur = [ref], seen = new Set([ref.id]);
+      for (let i = 0; i < N; i++) { const nx = []; cur.forEach(p => (kids[p.id]||[]).forEach(c => { if (!seen.has(c.id)) { seen.add(c.id); nx.push(c); } })); lvls.push(nx); cur = nx; }
+    }
+  }
+  const base = ref ? (lvls[Math.min(f.lv, N-1)] || []).filter(u => (S.showDel || uStatus(u) !== "deleted")) : pool;
+  const cnt = p => base.filter(u => inP(u, p)).length;
+  const inPer = base.filter(u => inP(u, f.p)).sort((a,b) => joined(b) - joined(a));
+  const nA = inPer.filter(isAct).length, nI = inPer.length - nA;
+  const list = ref ? inPer.filter(u => f.st === "active" ? isAct(u) : !isAct(u)) : inPer;
+  const b = (on, label, act) => `<button class="sm ${on ? "" : "out"}" onclick="${act}">${label}</button>`;
+  const rows = list.length ? list.map(u => { const rb = u.referredBy ? (S.users.find(x=>x.id===u.referredBy)?.code || "-") : "-"; return `<tr><td>${cp(uName(u))}</td><td>${esc(fdt(joined(u)))}</td><td><b>${tasks(u)}</b></td><td>${fmt(u.balance)}</td><td>${cp(u.code)}</td><td>${esc(rb)}</td><td>${esc(u.lastIp||"-")}</td><td><span class="tag ${isAct(u) ? "" : "cr"}">${isAct(u) ? "Active" : "Inactive"}</span></td></tr>`; }).join("") : `<tr><td colspan="8" style="color:var(--mute)">No new users found.</td></tr>`;
+  return `<h1>New users</h1><div class="box">
+  <input id="nu_q" placeholder="Search by referral code to see that code's new team..." autocomplete="off" value="${esc(f.q)}" style="max-width:380px;margin-bottom:12px" oninput="window.nuSet('q',this.value)">
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${b(f.p==="today", "Today ("+cnt("today")+")", "window.nuSet('p','today')")}${b(f.p==="7d", "Last 7 days ("+cnt("7d")+")", "window.nuSet('p','7d')")}</div>
+  ${q && !ref ? `<p style="color:var(--red);font-size:14px">No user found with this referral code.</p>` : ""}
+  ${ref ? `<p style="font-size:14px;margin-bottom:10px">Referral code <b>${esc(ref.code)}</b> · ${esc(uName(ref))} · showing ${f.p==="today" ? "today's" : "last 7 days'"} new users in the team</p>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">${Array.from({length:N}, (_,i) => b(f.lv===i, lvName(i)+" ("+(lvls[i]||[]).filter(u=>inP(u,f.p) && (S.showDel || uStatus(u)!=="deleted")).length+")", "window.nuSet('lv',"+i+")")).join("")}</div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${b(f.st==="active", "Active ("+nA+")", "window.nuSet('st','active')")}${b(f.st==="inactive", "Inactive ("+nI+")", "window.nuSet('st','inactive')")}</div>` : ""}
+  <p style="font-size:12px;color:var(--mute);margin-bottom:10px">Active = completed ${need}+ tasks. Days follow Bangladesh time and reset at 12:00 AM. Last 7 days includes today.</p>
+  <table><thead><tr><th>User</th><th>Joined</th><th>Task count</th><th>Balance</th><th>Refer code</th><th>Referred by</th><th>Last IP</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
 
 const lastNum = k => { try { return localStorage.getItem("nerivo_"+k) || ""; } catch { return ""; } };
 
@@ -386,7 +445,6 @@ function refer(){
     <td>${s.n}</td><td>${fmt(s.sum)}</td><td>${i===last && last>0 ? `<button class="sm red" data-rfdel>Remove</button>` : ""}</td></tr>`; }).join("");
   const ex = c.levels.map((l,i)=>`${lvName(i)}: <b>${l.on ? fmt(Math.round(1000*l.pct)/100) : "off"}</b>`).join(" &nbsp;·&nbsp; ");
   const refd = S.users.filter(u=>u.referredBy), nAct = refd.filter(u=>u.refActive===true).length, bonusSum = S.users.reduce((a,u)=>a+Number(u.refBonusPaid||0),0), bonusN = S.users.filter(u=>Number(u.refBonusPaid||0)>0).length;
-  const needOpts = [...new Set([30,40,50,c.activeTasks])].sort((a,b)=>a-b).map(n=>`<option value="${n}" ${n===c.activeTasks?"selected":""}>${n} tasks</option>`).join("");
   const rows = st.rows.slice(0,40).map(r=>`<tr><td>${esc(fdt(r.at))}</td><td>${esc(r.name||lvName(r.level))}</td><td>${esc(userLabel(r.uid))}</td><td>${esc(userLabel(r.from))}</td><td>${fmt(r.orderAmount)}</td><td>${r.pct}%</td><td><b>${fmt(r.amount)}</b></td></tr>`).join("");
   return `<h1>Refer program</h1>
   <div class="cards"><div class="card"><small>Program</small><b>${c.enabled ? "On" : "Off"}</b></div><div class="card"><small>Active levels</small><b>${c.levels.filter(l=>l.on).length} / ${c.levels.length}</b></div><div class="card"><small>Total commission paid</small><b>${fmt(st.total)} BDT</b></div><div class="card"><small>Commissions paid</small><b>${st.rows.length}</b></div><div class="card"><small>Taken back (task failed)</small><b>${fmt(st.back)} BDT</b></div></div>
@@ -398,7 +456,7 @@ function refer(){
   <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px"><button data-saveref>Save changes</button><button class="out" data-addlv ${c.levels.length>=10?"disabled":""}>+ Add ${c.levels.length<10 ? lvName(c.levels.length) : "level"}</button></div></div>
   <div class="box"><h3 style="margin-bottom:6px">Active referral bonus</h3>
   <p style="font-size:13px;color:var(--mute);line-height:1.6">A referred user becomes <b>Active</b> after completing the task target below (only <b>Success</b> tasks are counted, from the day the account was opened). Users who have not reached it stay <b>Inactive</b>. The moment a user becomes Active, the direct referrer (A level) gets the bonus automatically, only once per user. The bonus is not taken back if a task fails later. Changes apply to the next Success task.</p>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;max-width:440px;margin-top:10px"><div><label>Active task target</label><select id="rf_need">${needOpts}</select></div><div><label>Bonus per active user (BDT)</label><input id="rf_bonus" type="number" min="0" step="1" value="${c.activeBonus}"></div></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;max-width:440px;margin-top:10px"><div><label>Active task target (number of tasks)</label><input id="rf_need" type="number" min="1" step="1" placeholder="e.g. 30" value="${c.activeTasks}"></div><div><label>Bonus per active user (BDT)</label><input id="rf_bonus" type="number" min="0" step="1" value="${c.activeBonus}"></div></div>
   <div class="cards" style="margin-top:12px"><div class="card"><small>Referred users</small><b>${refd.length}</b></div><div class="card"><small>Active</small><b>${nAct}</b></div><div class="card"><small>Inactive</small><b>${refd.length-nAct}</b></div><div class="card"><small>Bonus paid</small><b>${fmt(bonusSum)} BDT</b></div><div class="card"><small>Bonuses given</small><b>${bonusN}</b></div></div>
   <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px"><button data-saveref>Save changes</button><button class="out" data-rfrebuild>Rebuild team stats</button></div>
   <p style="font-size:12px;color:var(--mute);line-height:1.6;margin-top:10px"><b>Rebuild team stats</b> counts every old Success task again and fills each user's My Team lists (A, B, C ... levels). Use it once after this update. It does not pay any bonus; users who already reached the target are just marked Active.</p></div>
@@ -409,7 +467,7 @@ function collectRef(){
   document.querySelectorAll('[data-rf="pct"]').forEach(el=>{ const i = +el.dataset.i; if (c.levels[i]) c.levels[i].pct = Math.min(100, Math.max(0, Math.round((Number(el.value)||0)*100)/100)); });
   document.querySelectorAll('[data-rf="on"]').forEach(el=>{ const i = +el.dataset.i; if (c.levels[i]) c.levels[i].on = el.checked; });
   const en = $("#rf_en"); if (en) c.enabled = en.checked;
-  const nd = $("#rf_need"); if (nd) c.activeTasks = Math.max(1, Number(nd.value)||30);
+  const nd = $("#rf_need"); if (nd) c.activeTasks = Math.max(1, Math.floor(Number(nd.value)) || 30);
   const bn = $("#rf_bonus"); if (bn) c.activeBonus = Math.max(0, round2(bn.value));
   return c;
 }
@@ -531,9 +589,9 @@ function tfListRows(kind){
   let list = S.users.filter(u => kind==="done" ? !!st[u.id] : !st[u.id]);
   if (q) list = list.filter(u => [uName(u), u.code, u.lastIp].join(" ").toLowerCase().includes(q));
   list.sort((a,b) => kind==="done" ? (st[b.id].last - st[a.id].last) : (Number(b.balance||0) - Number(a.balance||0)));
-  if (!list.length) return `<tr><td colspan="${kind==="done" ? 7 : 4}" style="color:var(--mute)">${kind==="done" ? "No user received a transfer in this period." : "No users here."}</td></tr>`;
+  if (!list.length) return `<tr><td colspan="${kind==="done" ? 8 : 5}" style="color:var(--mute)">${kind==="done" ? "No user received a transfer in this period." : "No users here."}</td></tr>`;
   return list.map(u => { const r = st[u.id];
-    const base = `<td>${cp(uName(u))}<br><span style="font-size:12px;color:var(--mute)">ref ${esc(u.code||"-")}</span><br><span style="font-size:12px;color:#0b7a55">Today profit: <b>${fmt(u.statsDate===todayS() ? u.income : 0)}</b> BDT</span></td><td><b>${fmt(u.balance||0)}</b></td><td>${esc(u.lastIp||"-")}</td>`;
+    const base = `<td>${cp(uName(u))}<br><span style="font-size:12px;color:var(--mute)">ref ${esc(u.code||"-")}</span><br><span style="font-size:12px;color:#0b7a55">Today profit: <b>${fmt(u.statsDate===todayS() ? u.income : 0)}</b> BDT</span></td><td><b>${fmt(u.balance||0)}</b></td><td>${esc(u.lastIp||"-")}</td><td>${presCell(u)}</td>`;
     return kind==="done"
       ? `<tr>${base}<td>${r.n}</td><td>${fmt(r.total)}</td><td>${esc(fdt(r.last))}</td><td><button class="sm" data-tfgo="${esc(u.code||"")}">Transfer</button> <button class="sm out" data-tfhist="${esc(u.id)}">History</button></td></tr>`
       : `<tr>${base}<td><button class="sm" data-tfgo="${esc(u.code||"")}">Transfer</button> <button class="sm out" data-tfhist="${esc(u.id)}">History</button></td></tr>`;
@@ -546,7 +604,7 @@ function tfHint(k){
   const u = rcFindUser(q);
   if (!u) return `<div style="margin-top:6px;font-size:13px;color:var(--red)">No user found with this referral code.</div>`;
   const td = k === "t" ? (tfStats()[u.id] || {}).today || 0 : 0;
-  return `<div style="margin-top:6px;font-size:13px;color:#0b7a55">✓ <b>${esc(uName(u)||u.id.slice(0,6))}</b> · balance ${fmt(u.balance||0)} BDT</div>` + (k === "t" ? `<div style="font-size:12px;color:var(--mute)">Received by transfer today: ${fmt(td)}${S.transferLimit ? " / limit "+fmt(S.transferLimit) : " (no limit)"} BDT</div>` : "");
+  return `<div style="margin-top:6px;font-size:13px;color:#0b7a55">✓ <b>${esc(uName(u)||u.id.slice(0,6))}</b> · balance ${fmt(u.balance||0)} BDT · ${presCell(u)}</div>` + (k === "t" ? `<div style="font-size:12px;color:var(--mute)">Received by transfer today: ${fmt(td)}${S.transferLimit ? " / limit "+fmt(S.transferLimit) : " (no limit)"} BDT</div>` : "");
 }
 window.tfFind = (k,v) => { S.tf[k+"q"] = v; const el = $("#tf_"+k+"res"); if (el) el.innerHTML = tfHint(k); };
 window.tfSet = (k,v) => { S.tf[k] = v; };
@@ -556,7 +614,7 @@ function transfer(){
   const st = tfStats(tfRange(S.tfd)), doneN = S.users.filter(u=>st[u.id]).length, noneN = S.users.length - doneN;
   const tabs = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px"><button class="sm ${S.ttab==="new"?"":"out"}" data-ttab="new">New transfer</button><button class="sm ${S.ttab==="done"?"":"out"}" data-ttab="done">Transferred users (${doneN})</button><button class="sm ${S.ttab==="none"?"":"out"}" data-ttab="none">Not transferred (${noneN})</button></div>`;
   if (S.ttab !== "new") {
-    const head = S.ttab==="done" ? "<th>User</th><th>Balance</th><th>IP</th><th>Times</th><th>Amount</th><th>Last</th><th></th>" : "<th>User</th><th>Balance</th><th>IP</th><th></th>";
+    const head = S.ttab==="done" ? "<th>User</th><th>Balance</th><th>IP</th><th>Online</th><th>Times</th><th>Amount</th><th>Last</th><th></th>" : "<th>User</th><th>Balance</th><th>IP</th><th>Online</th><th></th>";
     return `<h1>Balance transfer</h1>${tabs}<div class="box"><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px"><select style="width:auto;padding:7px 10px" onchange="window.tfDay(this.value)">${tfDayOpts(S.tfd)}</select><input id="tf_s" placeholder="Search name, referral code or IP..." value="${esc(S.tfs)}" style="max-width:320px" oninput="window.tfSearch(this.value)"></div><p style="font-size:13px;color:var(--mute);line-height:1.5;margin-bottom:10px">${S.ttab==="done" ? "Users who received a transfer in the chosen day. <b>Times</b> = number of transfers, <b>Amount</b> = total received in that day." : "Users who did <b>not</b> receive any transfer in the chosen day."}</p><table><thead><tr>${head}</tr></thead><tbody id="tf_body">${tfListRows(S.ttab)}</tbody></table></div>`;
   }
   return `<h1>Balance transfer</h1>${tabs}<div class="box"><h3 style="margin-bottom:6px">Transfer balance between users</h3><p style="font-size:13px;color:var(--mute);line-height:1.5">Only admin can transfer. The amount moves from one user's balance to another, as many times as you want. Users cannot see transfers in their history, you can see them in each user's History here. The daily limit per receiving user is set in Settings.</p>
@@ -692,11 +750,11 @@ window.addEventListener("popstate", e => {
   navLast = JSON.stringify(navSnap());
 });
 function render(){
-  const r = $("#root"), ae = document.activeElement, keepId = ae && (/^(oq|sq|sf_a|sf_n|sf_q|rc_a|rc_c|rc_r|rc_m|tf_f|tf_t|tf_a|tf_n|tf_s|tl_v)$/.test(ae.id)) ? ae.id : null, keepOq = keepId ? ae.selectionStart : null;
+  const r = $("#root"), ae = document.activeElement, keepId = ae && (/^(nu_q|oq|sq|sf_a|sf_n|sf_q|rc_a|rc_c|rc_r|rc_m|tf_f|tf_t|tf_a|tf_n|tf_s|tl_v)$/.test(ae.id)) ? ae.id : null, keepOq = keepId ? ae.selectionStart : null;
   if (!S.admin) { r.innerHTML = login(); return; }
-  if (S.tab === "refer" && ae && ae.dataset && ae.dataset.rf === "pct") return;   /* do not wipe a % being typed */
+  if (S.tab === "refer" && ae && ((ae.dataset && ae.dataset.rf === "pct") || ae.id === "rf_need" || ae.id === "rf_bonus")) return;   /* do not wipe a % being typed */
   const n=(k,l)=>`<button class="${S.tab===k?"act":""}" data-tab="${k}">${l}</button>`;
-  r.innerHTML = `<div class="wrap"><aside><h2>Nova Pay Admin</h2>${n("dash","Dashboard")}${n("users","Users")}${n("orders","Buy orders")}${n("sells","Sell orders")}${n("refer","Refer program")}${n("redeem","Redeem codes")}${n("transfer","Transfer")}${n("settings","Settings")}<button data-logout style="margin-top:18px;background:rgba(255,255,255,.18);color:#fff">Log out</button></aside><main>${navIdx>0 ? `<button class="sm out" data-goback style="margin-bottom:10px">‹ Back</button>` : ""}${({dash,users,orders,sells,refer,redeem,transfer,settings})[S.tab]()}</main></div>`;
+  r.innerHTML = `<div class="wrap"><aside><h2>Nova Pay Admin</h2>${n("dash","Dashboard")}${n("users","Users")}${n("newu","New users")}${n("orders","Buy orders")}${n("sells","Sell orders")}${n("refer","Refer program")}${n("redeem","Redeem codes")}${n("transfer","Transfer")}${n("settings","Settings")}<button data-logout style="margin-top:18px;background:rgba(255,255,255,.18);color:#fff">Log out</button></aside><main>${navIdx>0 ? `<button class="sm out" data-goback style="margin-bottom:10px">‹ Back</button>` : ""}${({dash,users,newu:newUsers,orders,sells,refer,redeem,transfer,settings})[S.tab]()}</main></div>`;
   navSync();
   if (keepOq !== null) { const el = $("#"+keepId); if (el) { el.focus(); try { el.setSelectionRange(keepOq,keepOq); } catch {} } }
 }
@@ -706,7 +764,13 @@ function subscribe(){
   const {collection,doc,onSnapshot} = fb;
   const err = n => e => { console.error(n, e); toast("Cannot read "+n+": "+(e.code||e.message)); };
   unsubs = [
-    onSnapshot(collection(db,"users"), s=>{ S.users=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, err("users")),
+    onSnapshot(collection(db,"users"), s=>{
+      const prev = new Map(S.users.map(u=>[u.id,u])); let structural = prev.size !== s.size;
+      const next = s.docs.map(d=>{ const n = {id:d.id,...d.data()}, o = prev.get(d.id);
+        if(!structural){ if(!o) structural = true; else { const a = Object.keys(n).filter(k=>k!=="lastSeenAt"), b = Object.keys(o).filter(k=>k!=="lastSeenAt");
+          if(a.length !== b.length || a.some(k=>JSON.stringify(n[k]) !== JSON.stringify(o[k]))) structural = true; } }
+        return n; });
+      S.users = next; structural ? render() : refreshPresence(); }, err("users")),
     onSnapshot(collection(db,"buyOrders"), s=>{ S.orders=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, err("buyOrders")),
     onSnapshot(collection(db,"sellOrders"), s=>{ S.sells=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, err("sellOrders")),
     onSnapshot(doc(db,"settings","transferLimit"), s=>{ S.transferLimit = s.exists() ? (Number(s.data().perUserPerDay)||0) : 0; if(S.tab!=="settings") render(); }, ()=>{}),
@@ -721,6 +785,7 @@ function subscribe(){
     onSnapshot(doc(db,"settings","wallets"), s=>{ if(s.exists()){ const d=s.data(); S.wl={bkash:d.bkash||[],nagad:d.nagad||[]}; } if(S.tab!=="orders") render(); }, ()=>{}),
     onSnapshot(doc(db,"settings","rates"), s=>{ if(s.exists()) S.rates=s.data(); if(S.tab!=="settings") render(); }, err("settings/rates"))
   ];
+  { const iv = setInterval(refreshPresence, 20000); unsubs.push(()=>clearInterval(iv)); }   /* online -> last seen without a page refresh */
 }
 
 async function doLogin(){
@@ -739,7 +804,7 @@ function editUser(id){
   const f = (k,l)=>`<label>${l}</label><input id="f_${k}" type="number" step="0.01" value="${u[k]||0}">`;
   const m = document.createElement("div"); m.className="modal";
   m.innerHTML = `<div class="sheet"><h2>${esc(uName(u))}</h2>
-  <div class="box" style="margin-top:10px;padding:10px 14px;font-size:13px;color:var(--mute)">Referral code: <b>${esc(u.code||"-")}</b> &nbsp; Last IP: <b>${esc(u.lastIp||"-")}</b>${u.lastSeenAt ? " ("+esc(u.lastSeenAt.toDate ? u.lastSeenAt.toDate().toLocaleString() : "")+")" : ""}<br>Passwords cannot be viewed (Firebase never stores them in readable form). Use "Send password reset" below if the user is locked out.</div>
+  <div class="box" style="margin-top:10px;padding:10px 14px;font-size:13px;color:var(--mute)">Referral code: <b>${esc(u.code||"-")}</b> &nbsp; Last IP: <b>${esc(u.lastIp||"-")}</b> &nbsp; ${presCell(u)}${u.lastSeenAt ? " ("+esc(fdt(seenMs(u)))+")" : ""}<br>Passwords cannot be viewed (Firebase never stores them in readable form). Use "Send password reset" below if the user is locked out.</div>
   <div class="box" style="margin-top:10px;padding:10px 14px;font-size:13px;color:var(--mute)">Balance: <b>${fmt(u.balance)} BDT</b>. To add or cut balance use the <b>Balance</b> button (reason is saved in history).</div>${f("income","Today's income")}${f("saleAmount","Sale amount")}${f("saleOrders","Sale orders")}${f("purchaseAmount","Purchase amount")}${f("purchaseOrders","Purchase orders")}
   <label style="margin-top:14px">Wallets (only admin can remove)</label><div id="eu_w" class="box" style="margin-top:4px;padding:8px 12px;font-size:14px;color:var(--mute)">Loading...</div>
   <label>Set referrer (referral code or UID)</label><input id="f_ref" placeholder="${u.referredBy ? "Already set" : "e.g. ab12cd"}">
