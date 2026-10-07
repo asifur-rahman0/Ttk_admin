@@ -125,9 +125,35 @@ S.ttab = "new"; S.tfs = ""; S.tfd = "0"; S.transferLimit = 0; S.bonus = 0;
 S.rc = { amount:"", code:"", target:"all", ref:"", max:"" };
 /* Refer program: level i = the i-th person above the user who finished the task (A = direct referrer, B = referrer of A ...) */
 S.refCfg = null;
-const REF_DEF = { enabled:true, levels:[{pct:3,on:true},{pct:2,on:true},{pct:1,on:true}] };
-const refCfg = () => { const c = S.refCfg; return c && Array.isArray(c.levels) && c.levels.length ? { enabled:c.enabled!==false, levels:c.levels.map(l=>({ pct:Number(l.pct)||0, on:l.on!==false })) } : JSON.parse(JSON.stringify(REF_DEF)); };
+const REF_DEF = { enabled:true, levels:[{pct:0.3,on:true},{pct:0.2,on:true},{pct:0.1,on:true}], activeTasks:30, activeBonus:100 };
+const refCfg = () => { const c = S.refCfg; return c && Array.isArray(c.levels) && c.levels.length ? { enabled:c.enabled!==false, levels:c.levels.map(l=>({ pct:Number(l.pct)||0, on:l.on!==false })), activeTasks:Number(c.activeTasks)||30, activeBonus:c.activeBonus==null ? 100 : Math.max(0, Number(c.activeBonus)||0) } : JSON.parse(JSON.stringify(REF_DEF)); };
 const lvName = i => String.fromCharCode(65+i)+" level";
+const round2 = n => Math.round(Number(n||0) * 100) / 100;
+const maskName = (ph, em) => (ph && ph.length >= 8) ? ph.slice(0,4) + "****" + ph.slice(-3) : ((em || "user").split("@")[0].slice(0,2) + "***");
+/* Withdraw (sell) order ID: automatic short ID like WD123456. A buy task can be linked to it. */
+const sNo = o => o.orderNo || String(o.id).slice(0,8).toUpperCase();
+const B62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+/* Order ID = 10 digit time (seconds) + 9 random letters/digits, e.g. 1791306953ch8PRjPuI */
+const newSellNo = () => { let n; do { const a = new Uint32Array(9); (window.crypto || {}).getRandomValues ? crypto.getRandomValues(a) : a.forEach((_,i)=>{ a[i] = Math.floor(Math.random()*4294967296); }); n = String(Math.floor(Date.now()/1000)) + Array.from(a, x => B62[x % 62]).join(""); } while (S.sells.some(x=>x.orderNo===n)); return n; };
+const findSell = q => { q = String(q||"").trim(); if (!q) return null; const u = q.toUpperCase(); return S.sells.find(o => sNo(o)===q || o.id===q) || S.sells.find(o => sNo(o).toUpperCase()===u || String(o.id).toUpperCase()===u) || null; };
+const sellTasks = o => S.orders.filter(x => x.sellOrderId===o.id && OS(x)!=="failed");
+const sellPaid = o => round2(sellTasks(o).filter(x=>OS(x)==="success").reduce((a,x)=>a+Number(x.amount||0),0));
+const sellLinked = o => round2(sellTasks(o).reduce((a,x)=>a+Number(x.amount||0),0));
+const sellRemain = o => Math.max(0, round2(Number(o.amount||0) - sellLinked(o)));
+window.owdFind = v => {
+  const el = $("#owd_res"); if (!el) return;
+  const q = String(v||"").trim(); const bk = $("#ob"), ng = $("#on");
+  const lock = !!q; [bk, ng].forEach(i => { if (i) i.disabled = false; });
+  if (!q) { el.innerHTML = ""; return; }
+  const o = findSell(q);
+  if (!o) { el.innerHTML = `<div style="margin-top:6px;font-size:13px;color:var(--red)">No order found with this ID.</div>`; return; }
+  if (o.status==="success" || o.status==="failed") { el.innerHTML = `<div style="margin-top:6px;font-size:13px;color:var(--red)">This withdraw is already ${esc(SL[o.status]||o.status)}.</div>`; return; }
+  const rem = sellRemain(o);
+  if (bk) { bk.value = o.method==="bkash" ? o.number : ""; bk.disabled = lock; }
+  if (ng) { ng.value = o.method==="nagad" ? o.number : ""; ng.disabled = lock; }
+  const oa = $("#oa"); if (oa && rem >= 100) oa.value = rem;
+  el.innerHTML = `<div style="margin-top:6px;font-size:13px;color:#0b7a55">✓ <b>${esc(sNo(o))}</b> · ${esc(userLabel(o.userId))}<br>${fmt(o.amount)} BDT via ${esc(payName(o.method))} ${esc(o.number)}</div><div style="font-size:12px;color:var(--mute)">Already linked to tasks: ${fmt(sellLinked(o))} · Remaining: ${fmt(rem)} BDT. The task will pay this number, and this user will not see the task.</div>`;
+};
 const RT = { credit:"Add balance", debit:"Cut balance", both:"Add & Cut" };
 const modal = html => { const m = document.createElement("div"); m.className = "modal"; m.innerHTML = `<div class="sheet">${html}</div>`; document.body.append(m); return m; };
 const adminEmail = () => (auth?.currentUser?.email) || "admin";
@@ -193,7 +219,7 @@ const lastNum = k => { try { return localStorage.getItem("nerivo_"+k) || ""; } c
 const userLabel = uid => { const u = S.users.find(x=>x.id===uid); return u ? (uName(u) || uid.slice(0,6)) + " · ref " + (u.code || "-") + (u.lastIp ? " · IP " + u.lastIp : "") : (uid ? uid.slice(0,6)+"..." : "-"); };
 function oList(){
   const q = S.oq.trim().toLowerCase();
-  return S.orders.filter(o => (S.of==="all" || OS(o)===S.of) && (!q || [o.amount,o.trxId,o.senderNumber,o.payMethod,o.bkashNumber,o.nagadNumber,o.mask,userLabel(o.claimedBy)].join(" ").toLowerCase().includes(q)));
+  return S.orders.filter(o => (S.of==="all" || OS(o)===S.of) && (!q || [o.amount,o.trxId,o.senderNumber,o.payMethod,o.bkashNumber,o.nagadNumber,o.mask,o.sellOrderNo,userLabel(o.claimedBy)].join(" ").toLowerCase().includes(q)));
 }
 function orderRows(){
   if (!S.orders.length) return `<tr><td colspan="7" style="color:var(--mute)">No orders yet. Create the first one above.</td></tr>`;
@@ -207,7 +233,7 @@ function orderRows(){
     const proof = o.trxId ? `${esc(o.payMethod)} from ${cp(o.senderNumber)}<br>TrxID: ${cp(o.trxId)}${dup[o.trxId.toUpperCase()]>1 ? ' <span class="tag x">DUPLICATE</span>' : ""}`
       : (o.payMethod ? `${esc(o.payMethod)}<br><span style="color:var(--mute)">TrxID not submitted</span>` : "-");
     const opts = (claimed ? [o.trxId ? "pending" : "created","success","failed","lock","open"] : ["open","lock"]).map(k=>`<option value="${k}" ${k===st?"selected":""}>${k==="open" && claimed ? "Open (release)" : LBL[k]}</option>`).join("");
-    return `<tr><td>${esc(fdt(when(o)))}</td><td>${fmt(o.amount)}</td><td>bKash: ${cp(o.bkashNumber)}<br>Nagad: ${cp(o.nagadNumber)}</td><td><span class="tag ${TC[st]||""}">${esc(LBL[st]||st)}</span></td><td>${esc(userLabel(o.claimedBy))}</td><td>${proof}</td>
+    return `<tr><td>${esc(fdt(when(o)))}</td><td>${fmt(o.amount)}</td><td>bKash: ${cp(o.bkashNumber)}<br>Nagad: ${cp(o.nagadNumber)}${o.sellOrderNo ? `<br><span class="tag cr">Order ${esc(o.sellOrderNo)}</span>` : ""}</td><td><span class="tag ${TC[st]||""}">${esc(LBL[st]||st)}</span></td><td>${esc(userLabel(o.claimedBy))}</td><td>${proof}</td>
     <td><select id="st_${o.id}" style="width:auto;padding:6px 8px;font-size:13px">${opts}</select> <button class="sm" data-apply="${o.id}">Apply</button> <button class="sm out" data-hist="${o.id}">History</button> <button class="sm red" data-delorder="${o.id}">Delete</button></td></tr>`;
   }).join("");
 }
@@ -229,6 +255,7 @@ function orders(){
   const fl = [["all","All"],["open","Open"],["created","Order Create"],["pending","Pending"],["success","Success"],["failed","Failed"],["lock","Lock"]];
   const cnt = k => k==="all" ? S.orders.length : S.orders.filter(o=>OS(o)===k).length;
   return `<h1>Buy orders</h1><div class="box"><h3 style="margin-bottom:10px">Create order</h3><div class="form">
+  <div><label>Order ID (optional)</label><input id="owd" placeholder="e.g. 1791306953ch8PRjPuI" autocomplete="off" oninput="window.owdFind(this.value)"><div id="owd_res"></div><div style="font-size:12px;color:var(--mute);margin-top:4px">Paste the Order ID from Sell orders: the task will pay that user's wallet number, and that user cannot see or take this task.</div></div>
   <div><label>Amount (BDT)</label><input id="oa" type="number" min="100" value="111"></div>
   <div><label>bKash number (user sends money here)</label>${wsel("bkash","ob")}<input id="ob" type="tel" placeholder="01XXXXXXXXX" value=""></div>
   <div><label>Nagad number (user sends money here)</label>${wsel("nagad","on")}<input id="on" type="tel" placeholder="01XXXXXXXXX" value=""></div>
@@ -243,7 +270,7 @@ function orders(){
 
 function sList(){
   const q = S.sq.trim().toLowerCase();
-  return S.sells.filter(o => (S.sf==="all" || o.status===S.sf) && (!q || [o.amount,o.method,o.number,userLabel(o.userId)].join(" ").toLowerCase().includes(q)));
+  return S.sells.filter(o => (S.sf==="all" || o.status===S.sf) && (!q || [o.amount,o.method,o.number,sNo(o),userLabel(o.userId)].join(" ").toLowerCase().includes(q)));
 }
 function sellRows(){
   if (!S.sells.length) return `<tr><td colspan="6" style="color:var(--mute)">No sell requests yet. They appear here when a user sells (withdraws) balance.</td></tr>`;
@@ -254,7 +281,7 @@ function sellRows(){
     const fin = o.status==="success" || o.status==="failed";
     const opts = ["processing","success","failed","lock"].map(k=>`<option value="${k}" ${k===o.status?"selected":""}>${k==="processing" && o.status==="lock" ? "Processing (unlock)" : SL[k]}</option>`).join("");
     const act = fin ? `<span style="color:var(--mute);font-size:13px">Final</span> ` : `<select id="ss_${o.id}" style="width:auto;padding:6px 8px;font-size:13px">${opts}</select> <button class="sm" data-sapply="${o.id}">Apply</button> `;
-    return `<tr><td>${esc(fdt(tms(o.createdAt)||(o.history&&o.history[0]&&o.history[0].at)||0))}</td><td>${fmt(o.amount)}</td><td>${esc(payName(o.method))}<br>${cp(o.number)}</td><td><span class="tag ${STC[o.status]||""}">${esc(SL[o.status]||o.status)}</span>${o.refunded ? ' <span class="tag cr">Refunded</span>' : ""}</td><td>${esc(userLabel(o.userId))}</td><td>${act}<button class="sm out" data-shist="${o.id}">History</button></td></tr>`;
+    return `<tr><td>${esc(fdt(tms(o.createdAt)||(o.history&&o.history[0]&&o.history[0].at)||0))}<br>${cp(sNo(o))}</td><td>${fmt(o.amount)}${sellTasks(o).length ? `<br><span style="font-size:12px;color:var(--mute)">Tasks: ${fmt(sellPaid(o))} paid · ${fmt(sellLinked(o)-sellPaid(o))} running</span>` : ""}</td><td>${esc(payName(o.method))}<br>${cp(o.number)}</td><td><span class="tag ${STC[o.status]||""}">${esc(SL[o.status]||o.status)}</span>${o.refunded ? ' <span class="tag cr">Refunded</span>' : ""}</td><td>${esc(userLabel(o.userId))}</td><td>${act}<button class="sm out" data-shist="${o.id}">History</button> <button class="sm out" data-scopy="${o.id}">Copy</button></td></tr>`;
   }).join("");
 }
 window.sfSet = (k,v) => { S.sellForm[k] = v; };
@@ -327,7 +354,7 @@ function sells(){
   const fl = [["all","All"],["processing","Processing"],["success","Success"],["failed","Failed"],["lock","Lock"]];
   const cnt = k => k==="all" ? S.sells.length : S.sells.filter(o=>o.status===k).length;
   const f = S.sellForm;
-  return `<h1>Sell orders</h1><div class="box"><h3 style="margin-bottom:10px">Create sell order</h3><div class="form">
+  return `<h1>Sell orders</h1><div class="box"><h3 style="margin-bottom:10px">Create sell order</h3><p style="font-size:13px;color:var(--mute);margin-bottom:8px">Every sell order gets an Order ID automatically (like 1791306953ch8PRjPuI). Paste it in <b>Buy orders → Order ID</b> to make a task that pays this user.</p><div class="form">
   <div><label>User (search by referral code)</label><input id="sf_q" placeholder="Type referral code..." autocomplete="off" value="${esc(f.q||"")}" oninput="window.sfSearch(this.value)"><div id="sf_res">${sfResults()}</div></div>
   <div><label>Amount (BDT)</label><input id="sf_a" type="number" min="100" placeholder="100 or more" value="${esc(f.a)}" oninput="window.sfSet('a',this.value)"></div>
   <div><label>Send money via</label><select id="sf_m" onchange="window.sfSet('m',this.value)"><option value="bkash" ${f.m==="bkash"?"selected":""}>bKash</option><option value="nagad" ${f.m==="nagad"?"selected":""}>Nagad</option></select></div>
@@ -337,15 +364,15 @@ function sells(){
   <div class="box"><p style="font-size:14px;color:var(--mute);line-height:1.6;margin-bottom:12px">Users cannot sell by themselves. Create the sell order here: the amount is cut from the user's balance at once and the request shows below as <b>Processing</b> (the user sees it in Order History → BDT Sell). The user's online wallet number is shown when you pick the user. To collect the money, create a task yourself in <b>Buy orders</b> with that number, or send the money directly. Nothing changes automatically: mark the request <b>Success</b> or <b>Failed</b> (the amount is refunded to the user, only once) yourself, whenever you decide. <b>Lock</b> holds the request and keeps the balance cut.</p>
   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${fl.map(([k,l])=>`<button class="sm ${S.sf===k?"":"out"}" data-sofilter="${k}">${l} (${cnt(k)})</button>`).join("")}</div>
   <input id="sq" placeholder="Search user, number, amount..." value="${esc(S.sq)}" style="max-width:360px;margin-bottom:12px" oninput="window.filterSells(this.value)">
-  <table><thead><tr><th>Time</th><th>Amount</th><th>Send money to</th><th>Status</th><th>User</th><th>Change status</th></tr></thead><tbody id="stb">${sellRows()}</tbody></table></div>`;
+  <table><thead><tr><th>Time / Order ID</th><th>Amount</th><th>Send money to</th><th>Status</th><th>User</th><th>Change status</th></tr></thead><tbody id="stb">${sellRows()}</tbody></table></div>`;
 }
 
 /* ---------- Refer program ---------- */
 function refStats(){
-  const by = {}, rows = [];
-  S.orders.forEach(o => (o.refPaid||[]).forEach(p => { const b = by[p.level] || (by[p.level] = { n:0, sum:0 }); b.n++; b.sum += Number(p.amount||0); rows.push({ ...p, orderAmount:o.amount, from:o.claimedBy, at:tms(o.reviewedAt)||tms(o.createdAt) }); }));
+  const by = {}, rows = []; let back = 0;
+  S.orders.forEach(o => { if (o.refReversed) { (o.refPaid||[]).forEach(p => { back += Number(p.amount||0); }); return; } (o.refPaid||[]).forEach(p => { const b = by[p.level] || (by[p.level] = { n:0, sum:0 }); b.n++; b.sum += Number(p.amount||0); rows.push({ ...p, orderAmount:o.amount, from:o.claimedBy, at:tms(o.reviewedAt)||tms(o.createdAt) }); }); });
   rows.sort((x,y)=>y.at-x.at);
-  return { by, rows, total:rows.reduce((s,r)=>s+Number(r.amount||0),0) };
+  return { by, rows, back, total:rows.reduce((s,r)=>s+Number(r.amount||0),0) };
 }
 function refer(){
   const c = refCfg(), st = refStats(), last = c.levels.length-1;
@@ -354,16 +381,24 @@ function refer(){
     <td><input data-rf="pct" data-i="${i}" type="number" min="0" max="100" step="0.01" value="${l.pct}" style="width:90px"></td>
     <td><label style="display:flex;align-items:center;gap:6px;margin:0;font-size:13px;color:var(--ink)"><input data-rf="on" data-i="${i}" type="checkbox" style="width:auto" ${l.on?"checked":""}><span>${l.on?"On":"Off"}</span></label></td>
     <td>${s.n}</td><td>${fmt(s.sum)}</td><td>${i===last && last>0 ? `<button class="sm red" data-rfdel>Remove</button>` : ""}</td></tr>`; }).join("");
-  const ex = c.levels.map((l,i)=>`${lvName(i)}: <b>${l.on ? fmt(Math.round(1000*l.pct)/100) : "off"}</b>`).join(" &nbsp;�&nbsp; ");
+  const ex = c.levels.map((l,i)=>`${lvName(i)}: <b>${l.on ? fmt(Math.round(1000*l.pct)/100) : "off"}</b>`).join(" &nbsp;·&nbsp; ");
+  const refd = S.users.filter(u=>u.referredBy), nAct = refd.filter(u=>u.refActive===true).length, bonusSum = S.users.reduce((a,u)=>a+Number(u.refBonusPaid||0),0), bonusN = S.users.filter(u=>Number(u.refBonusPaid||0)>0).length;
+  const needOpts = [...new Set([30,40,50,c.activeTasks])].sort((a,b)=>a-b).map(n=>`<option value="${n}" ${n===c.activeTasks?"selected":""}>${n} tasks</option>`).join("");
   const rows = st.rows.slice(0,40).map(r=>`<tr><td>${esc(fdt(r.at))}</td><td>${esc(r.name||lvName(r.level))}</td><td>${esc(userLabel(r.uid))}</td><td>${esc(userLabel(r.from))}</td><td>${fmt(r.orderAmount)}</td><td>${r.pct}%</td><td><b>${fmt(r.amount)}</b></td></tr>`).join("");
   return `<h1>Refer program</h1>
-  <div class="cards"><div class="card"><small>Program</small><b>${c.enabled ? "On" : "Off"}</b></div><div class="card"><small>Active levels</small><b>${c.levels.filter(l=>l.on).length} / ${c.levels.length}</b></div><div class="card"><small>Total commission paid</small><b>${fmt(st.total)} BDT</b></div><div class="card"><small>Commissions paid</small><b>${st.rows.length}</b></div></div>
+  <div class="cards"><div class="card"><small>Program</small><b>${c.enabled ? "On" : "Off"}</b></div><div class="card"><small>Active levels</small><b>${c.levels.filter(l=>l.on).length} / ${c.levels.length}</b></div><div class="card"><small>Total commission paid</small><b>${fmt(st.total)} BDT</b></div><div class="card"><small>Commissions paid</small><b>${st.rows.length}</b></div><div class="card"><small>Taken back (task failed)</small><b>${fmt(st.back)} BDT</b></div></div>
   <div class="box"><h3 style="margin-bottom:6px">Commission levels</h3>
-  <p style="font-size:13px;color:var(--mute);line-height:1.6">When a user's task (buy order) becomes <b>Success</b>, the people above that user get a commission automatically, as a % of the order amount: <b>A level</b> = the user's direct referrer, <b>B level</b> = the referrer of A, <b>C level</b> = the referrer of B, and so on. It is paid only once per order. Turn a level <b>Off</b> to stop paying it (the levels above it are still paid), change the %, or add a new level (D, E ...). Changes apply to orders that become Success after you save.</p>
+  <p style="font-size:13px;color:var(--mute);line-height:1.6">When a user's task (buy order) becomes <b>Success</b>, the people above that user get a commission automatically, as a % of the order amount: <b>A level</b> = the user's direct referrer, <b>B level</b> = the referrer of A, <b>C level</b> = the referrer of B, and so on. It is paid only once per order. If that task later becomes <b>Failed</b>, the commission is taken back from the uplines automatically (and paid again if the task becomes Success again). Turn a level <b>Off</b> to stop paying it (the levels above it are still paid), change the %, or add a new level (D, E ...). Changes apply to orders that become Success after you save.</p>
   <label style="display:flex;align-items:center;gap:8px;margin:12px 0;font-size:14px;color:var(--ink)"><input type="checkbox" id="rf_en" style="width:auto" ${c.enabled?"checked":""}> Refer program ON (turn off to stop all commissions)</label>
-  <table><thead><tr><th>Level</th><th>Commission %</th><th>Status</th><th>Paid (times)</th><th>Paid (BDT)</th><th></th></tr></thead><tbody>${lvRows}</tbody></table>
+  <table><thead><tr><th>Level</th><th>Commission % <span style="font-weight:500">(0.3 = 3 BDT per 1000)</span></th><th>Status</th><th>Paid (times)</th><th>Paid (BDT)</th><th></th></tr></thead><tbody>${lvRows}</tbody></table>
   <div style="font-size:13px;color:var(--mute);margin-top:10px">Example, order of 1000 BDT: ${ex}</div>
   <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px"><button data-saveref>Save changes</button><button class="out" data-addlv ${c.levels.length>=10?"disabled":""}>+ Add ${c.levels.length<10 ? lvName(c.levels.length) : "level"}</button></div></div>
+  <div class="box"><h3 style="margin-bottom:6px">Active referral bonus</h3>
+  <p style="font-size:13px;color:var(--mute);line-height:1.6">A referred user becomes <b>Active</b> after completing the task target below (only <b>Success</b> tasks are counted, from the day the account was opened). Users who have not reached it stay <b>Inactive</b>. The moment a user becomes Active, the direct referrer (A level) gets the bonus automatically, only once per user. The bonus is not taken back if a task fails later. Changes apply to the next Success task.</p>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;max-width:440px;margin-top:10px"><div><label>Active task target</label><select id="rf_need">${needOpts}</select></div><div><label>Bonus per active user (BDT)</label><input id="rf_bonus" type="number" min="0" step="1" value="${c.activeBonus}"></div></div>
+  <div class="cards" style="margin-top:12px"><div class="card"><small>Referred users</small><b>${refd.length}</b></div><div class="card"><small>Active</small><b>${nAct}</b></div><div class="card"><small>Inactive</small><b>${refd.length-nAct}</b></div><div class="card"><small>Bonus paid</small><b>${fmt(bonusSum)} BDT</b></div><div class="card"><small>Bonuses given</small><b>${bonusN}</b></div></div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px"><button data-saveref>Save changes</button><button class="out" data-rfrebuild>Rebuild team stats</button></div>
+  <p style="font-size:12px;color:var(--mute);line-height:1.6;margin-top:10px"><b>Rebuild team stats</b> counts every old Success task again and fills each user's My Team lists (A, B, C ... levels). Use it once after this update. It does not pay any bonus; users who already reached the target are just marked Active.</p></div>
   <div class="box"><h3 style="margin-bottom:10px">Recent commissions</h3><table><thead><tr><th>Time</th><th>Level</th><th>Upline (received)</th><th>Task user</th><th>Order</th><th>%</th><th>Commission</th></tr></thead><tbody>${rows || `<tr><td colspan="7" style="color:var(--mute)">No commission paid yet. It appears here after a user's order becomes Success.</td></tr>`}</tbody></table></div>`;
 }
 function collectRef(){
@@ -371,6 +406,8 @@ function collectRef(){
   document.querySelectorAll('[data-rf="pct"]').forEach(el=>{ const i = +el.dataset.i; if (c.levels[i]) c.levels[i].pct = Math.min(100, Math.max(0, Math.round((Number(el.value)||0)*100)/100)); });
   document.querySelectorAll('[data-rf="on"]').forEach(el=>{ const i = +el.dataset.i; if (c.levels[i]) c.levels[i].on = el.checked; });
   const en = $("#rf_en"); if (en) c.enabled = en.checked;
+  const nd = $("#rf_need"); if (nd) c.activeTasks = Math.max(1, Number(nd.value)||30);
+  const bn = $("#rf_bonus"); if (bn) c.activeBonus = Math.max(0, round2(bn.value));
   return c;
 }
 async function saveRef(c, msg){
@@ -493,7 +530,7 @@ function tfListRows(kind){
   list.sort((a,b) => kind==="done" ? (st[b.id].last - st[a.id].last) : (Number(b.balance||0) - Number(a.balance||0)));
   if (!list.length) return `<tr><td colspan="${kind==="done" ? 7 : 4}" style="color:var(--mute)">${kind==="done" ? "No user received a transfer in this period." : "No users here."}</td></tr>`;
   return list.map(u => { const r = st[u.id];
-    const base = `<td>${cp(uName(u))}<br><span style="font-size:12px;color:var(--mute)">ref ${esc(u.code||"-")}</span></td><td><b>${fmt(u.balance||0)}</b></td><td>${esc(u.lastIp||"-")}</td>`;
+    const base = `<td>${cp(uName(u))}<br><span style="font-size:12px;color:var(--mute)">ref ${esc(u.code||"-")}</span><br><span style="font-size:12px;color:#0b7a55">Today profit: <b>${fmt(u.statsDate===todayS() ? u.income : 0)}</b> BDT</span></td><td><b>${fmt(u.balance||0)}</b></td><td>${esc(u.lastIp||"-")}</td>`;
     return kind==="done"
       ? `<tr>${base}<td>${r.n}</td><td>${fmt(r.total)}</td><td>${esc(fdt(r.last))}</td><td><button class="sm" data-tfgo="${esc(u.code||"")}">Transfer</button> <button class="sm out" data-tfhist="${esc(u.id)}">History</button></td></tr>`
       : `<tr>${base}<td><button class="sm" data-tfgo="${esc(u.code||"")}">Transfer</button> <button class="sm out" data-tfhist="${esc(u.id)}">History</button></td></tr>`;
@@ -709,7 +746,7 @@ function editUser(id){
   loadEuWallets(id);
   $("#sv").onclick = async () => {
     const d = {}; ["income","saleAmount","saleOrders","purchaseAmount","purchaseOrders"].forEach(k=>d[k]=Number($("#f_"+k).value)||0);
-    d.statsDate = (()=>{const x=new Date();return x.getFullYear()+"-"+String(x.getMonth()+1).padStart(2,"0")+"-"+String(x.getDate()).padStart(2,"0")})();
+    d.statsDate = todayS();
     const rc = $("#f_ref").value.trim();
     if (rc && !DEMO) {
       try {
@@ -727,57 +764,175 @@ function editUser(id){
 }
 
 async function addOrder(){
-  const bk = $("#ob").value.trim(), ng = $("#on").value.trim(), okn = n => /^01\d{9}$/.test(n);
+  const wdq = ($("#owd") ? $("#owd").value : "").trim(), sell = wdq ? findSell(wdq) : null;
+  if (wdq && !sell) return toast("Order ID not found");
+  if (sell && (sell.status==="success" || sell.status==="failed")) return toast("This withdraw is already "+(SL[sell.status]||sell.status));
+  const bk = sell ? (sell.method==="bkash" ? sell.number : "") : $("#ob").value.trim(), ng = sell ? (sell.method==="nagad" ? sell.number : "") : $("#on").value.trim(), okn = n => /^01\d{9}$/.test(n);
   if ((bk && !okn(bk)) || (ng && !okn(ng))) return toast("Numbers must be 11 digits starting with 01");
   if (!bk && !ng) return toast("Enter a bKash or Nagad number");
-  const o = { amount:Number($("#oa").value), type: bk && ng ? "both" : (bk ? "bkash" : "nagad"), bkashNumber:bk, nagadNumber:ng, mask:$("#om").value.trim()||"179***"+Math.random().toString(36).slice(2,6), rate:Number($("#orr").value), cancels:0, status:"open" };
+  const o = { amount:Number($("#oa").value), type: bk && ng ? "both" : (bk ? "bkash" : "nagad"), bkashNumber:bk, nagadNumber:ng, mask:$("#om").value.trim()||"179***"+Math.random().toString(36).slice(2,6), rate:Number($("#orr").value), cancels:0, status:"open", ...(sell ? { sellOrderId:sell.id, sellOrderNo:sNo(sell), sellerId:sell.userId } : {}) };
   if (!(o.amount>=100)) return toast("Amount must be 100 or more");
+  if (sell && o.amount > sellRemain(sell)) return toast("Amount is more than the remaining withdraw amount ("+fmt(sellRemain(sell))+" BDT)");
   try {
     if (DEMO) S.orders.unshift({id:String(Date.now()),...o}); else await fb.addDoc(fb.collection(db,"buyOrders"),{...o,createdAt:fb.serverTimestamp()});
   } catch(e) {
     console.error(e);
     return toast("Create order failed: "+(e.code||e.message)+" | project: "+((db&&db.app&&db.app.options&&db.app.options.projectId)||"?")+" | admin: "+adminEmail());
   }
-  render(); toast("Order created");
+  render(); toast(sell ? "Order created (Order ID: "+sNo(sell)+")" : "Order created");
 }
 
-const todayS = () => { const x = new Date(); return x.getFullYear()+"-"+String(x.getMonth()+1).padStart(2,"0")+"-"+String(x.getDate()).padStart(2,"0"); };
+const todayS = () => new Date(Date.now()+6*3600*1000).toISOString().slice(0,10);   /* Bangladesh day (UTC+6), same as the user app */
+
+/* walk up the referral chain (A = direct referrer, B = referrer of A ...). Reads only. */
+async function readChain(t, first, self, n){
+  const out = [], seen = new Set([self]); let cur = first;
+  for (let i = 0; i < n && cur && !seen.has(cur); i++) {
+    seen.add(cur);
+    const ref = fb.doc(db,"users",cur), ps = await t.get(ref); if (!ps.exists()) break;
+    const d = ps.data(); out.push({ i, uid:cur, ref, d }); cur = d.referredBy;
+  }
+  return out;
+}
+
+/* My Team lists: write the member's task count / total / active flag into every upline's team list (A, B, C ...) */
+async function syncTeam(r){
+  if (!r || !r.chain || !r.chain.length) return;
+  const bad = [];
+  await Promise.all(r.chain.map(c => fb.setDoc(fb.doc(db,"users",c.uid,"team",r.uid), { name:r.name, level:c.i, tasks:r.tasks, amount:r.amount, active:r.active, need:r.need, ...(r.joinedAt ? { joinedAt:r.joinedAt } : (c.i > 0 ? { joinedAt:fb.serverTimestamp() } : {})) }, { merge:true }).catch(e => bad.push(e))));
+  if (bad.length) toast("Team list not updated ("+(bad[0].code||bad[0].message)+"). Check Firestore rules.");
+}
 
 async function creditSuccess(id, entry){
   const day = todayS();
-  await fb.runTransaction(db, async t => {
+  const res = await fb.runTransaction(db, async t => {
     const oRef = fb.doc(db,"buyOrders",id), os = await t.get(oRef);
     if (!os.exists()) throw new Error("Order not found");
     const od = os.data(); if (!od.claimedBy) throw new Error("No user claimed this order");
     const uRef = fb.doc(db,"users",od.claimedBy), us = await t.get(uRef);
     if (!us.exists()) throw new Error("User profile not found");
+    const u = us.data();
     const upd = { status:"success", reviewedAt:fb.serverTimestamp(), history:fb.arrayUnion(entry) };
-    if (od.credited) { t.update(oRef, upd); return; }          /* balance was already added once, never add twice */
     /* Refer program: read the settings + the upline chain first (all reads must happen before any write) */
     const rs = await t.get(fb.doc(db,"settings","referral")), rd = rs.exists() && Array.isArray(rs.data().levels) && rs.data().levels.length ? rs.data() : REF_DEF;
+    const need = Math.max(1, Number(rd.activeTasks)||30), bonus = rd.enabled !== false ? Math.max(0, round2(rd.activeBonus == null ? 100 : rd.activeBonus)) : 0;
+    const chain = await readChain(t, u.referredBy, od.claimedBy, rd.levels.length);
+    const hadList = od.credited && od.refReversed && Array.isArray(od.refPaid) && od.refPaid.length;
+    const back = [];
+    if (hadList) for (const p of od.refPaid) {      /* success again after a fail: give the same commissions back */
+      let c = chain.find(x => x.uid === p.uid);
+      if (!c) { const ref = fb.doc(db,"users",p.uid), ps = await t.get(ref); if (ps.exists()) c = { uid:p.uid, ref, d:ps.data() }; }
+      if (c) back.push({ p, c });
+    }
+    /* task counter + active check (a task is counted once; counted again only if it failed and became Success again) */
+    const recount = !od.credited || od.taskReversed === true;
+    const tasks = (Number(u.taskDone)||0) + (recount ? 1 : 0), tamt = round2((Number(u.taskAmount)||0) + (recount ? Number(od.amount||0) : 0));
+    const becameActive = recount && u.refActive !== true && tasks >= need, active = u.refActive === true || becameActive;
+    const bonusPaid = becameActive && bonus > 0 && chain[0] && (chain[0].d.accountStatus||"active") !== "deleted" ? bonus : 0;
     const ups = [];
-    if (rd.enabled !== false) {
-      const seen = new Set([od.claimedBy]); let cur = us.data().referredBy;
-      for (let i = 0; i < rd.levels.length && cur && !seen.has(cur); i++) {
-        seen.add(cur);
-        const pRef = fb.doc(db,"users",cur), ps = await t.get(pRef); if (!ps.exists()) break;
-        const pd = ps.data(), lv = rd.levels[i], pct = Number(lv.pct)||0, camt = Math.round(od.amount * pct) / 100;
-        if (lv.on !== false && camt > 0 && (pd.accountStatus||"active") !== "deleted") ups.push({ i, uid:cur, ref:pRef, bal:Number(pd.balance||0), inc:Number(pd.refIncome||0), pct, amt:camt });
-        cur = pd.referredBy;
+    if (!od.credited && rd.enabled !== false) chain.forEach(c => {
+      const lv = rd.levels[c.i], pct = Number(lv.pct)||0, camt = Math.round(od.amount * pct) / 100;
+      if (lv.on !== false && camt > 0 && (c.d.accountStatus||"active") !== "deleted") ups.push({ c, i:c.i, pct, amt:camt });
+    });
+    /* ---- writes ---- */
+    const pay = {};      /* one balance update per upline, even if it gets a commission and the bonus together */
+    const addPay = (c, amt) => { const k = pay[c.uid] || (pay[c.uid] = { ref:c.ref, bal:Number(c.d.balance||0), inc:Number(c.d.refIncome||0) }); k.bal += amt; k.inc += amt; return round2(k.bal); };
+    const LG = uid => fb.collection(db,"users",uid,"ledger");
+    const uu = {};
+    if (od.credited) {          /* balance was already added once, never add twice */
+      t.update(oRef, { ...upd, ...(hadList ? { refReversed:false } : {}), ...(od.taskReversed ? { taskReversed:false } : {}) });
+      back.forEach(({ p, c }) => {
+        const amt = Number(p.amount||0), nb = addPay(c, amt);
+        t.set(fb.doc(LG(p.uid)), { kind:"referral", direction:"credit", amount:amt, level:p.level, levelName:p.name||lvName(p.level), pct:p.pct, orderId:id, fromUid:od.claimedBy, balanceAfter:nb, createdAt:fb.serverTimestamp() });
+      });
+    } else {
+      const fresh = u.statsDate !== day, reward = Math.round(od.amount * od.rate) / 100;
+      t.update(oRef, { ...upd, credited:true, refPaid:ups.map(p=>({ uid:p.c.uid, level:p.i, name:lvName(p.i), pct:p.pct, amount:p.amt })) });
+      ups.forEach(p => {
+        const nb = addPay(p.c, p.amt);
+        t.set(fb.doc(LG(p.c.uid), id+"_ref"+p.i), { kind:"referral", direction:"credit", amount:p.amt, level:p.i, levelName:lvName(p.i), pct:p.pct, orderId:id, fromUid:od.claimedBy, balanceAfter:nb, createdAt:fb.serverTimestamp() });
+      });
+      Object.assign(uu, { balance:Math.round(((u.balance||0)+od.amount+reward)*100)/100, income:(fresh?0:(u.income||0))+reward, purchaseAmount:(fresh?0:(u.purchaseAmount||0))+od.amount, purchaseOrders:(fresh?0:(u.purchaseOrders||0))+1, statsDate:day });
+      const L = LG(od.claimedBy);
+      t.set(fb.doc(L,id+"_buy"), { kind:"purchase", amount:od.amount, orderId:id, createdAt:fb.serverTimestamp() });
+      t.set(fb.doc(L,id+"_reward"), { kind:"reward", amount:reward, orderId:id, createdAt:fb.serverTimestamp() });
+    }
+    if (recount) Object.assign(uu, { taskDone:tasks, taskAmount:tamt });
+    if (becameActive) Object.assign(uu, { refActive:true, refActiveAt:fb.serverTimestamp(), refBonusPaid:bonusPaid });
+    if (Object.keys(uu).length) t.update(uRef, uu);
+    if (bonusPaid > 0) {        /* Active referral bonus: the direct referrer (A level) gets it once */
+      const nb = addPay(chain[0], bonusPaid);
+      t.set(fb.doc(LG(chain[0].uid), "actbonus_"+od.claimedBy), { kind:"referral_bonus", direction:"credit", amount:bonusPaid, level:0, levelName:lvName(0), tasks:need, fromUid:od.claimedBy, orderId:id, balanceAfter:nb, createdAt:fb.serverTimestamp() });
+    }
+    Object.values(pay).forEach(k => t.update(k.ref, { balance:round2(k.bal), refIncome:round2(k.inc) }));
+    return { uid:od.claimedBy, name:maskName(u.phone, u.email), joinedAt:u.createdAt||null, tasks, amount:tamt, active, need, chain:chain.map(c=>({ uid:c.uid, i:c.i })), changed:recount };
+  });
+  if (res && res.changed) await syncTeam(res);
+}
+
+/* Task became Failed after it was Success: take the referral commission back from every upline (A, B, C ...) and uncount the task */
+async function reverseRef(id, entry){
+  const res = await fb.runTransaction(db, async t => {
+    const oRef = fb.doc(db,"buyOrders",id), os = await t.get(oRef);
+    if (!os.exists()) throw new Error("Order not found");
+    const od = os.data(), list = Array.isArray(od.refPaid) ? od.refPaid : [];
+    const base = { status:"failed", reviewedAt:fb.serverTimestamp(), history:fb.arrayUnion(entry) };
+    if (od.status === "done" || od.status === "claimed") base.credited = true;
+    const counted = !!od.claimedBy && (od.credited === true || od.status === "done") && od.taskReversed !== true;
+    let u = null, uRef = null, chain = [], rd = REF_DEF;
+    if (counted) {
+      uRef = fb.doc(db,"users",od.claimedBy); const us = await t.get(uRef);
+      if (us.exists()) {
+        u = us.data();
+        const rs = await t.get(fb.doc(db,"settings","referral")); if (rs.exists() && Array.isArray(rs.data().levels) && rs.data().levels.length) rd = rs.data();
+        chain = await readChain(t, u.referredBy, od.claimedBy, rd.levels.length);
       }
     }
-    const u = us.data(), fresh = u.statsDate !== day, reward = Math.round(od.amount * od.rate) / 100;
-    t.update(oRef, { ...upd, credited:true, refPaid:ups.map(p=>({ uid:p.uid, level:p.i, name:lvName(p.i), pct:p.pct, amount:p.amt })) });
-    ups.forEach(p => {
-      const nb = Math.round((p.bal + p.amt) * 100) / 100;
-      t.update(p.ref, { balance:nb, refIncome:Math.round((p.inc + p.amt) * 100) / 100 });
-      t.set(fb.doc(fb.collection(db,"users",p.uid,"ledger"), id+"_ref"+p.i), { kind:"referral", direction:"credit", amount:p.amt, level:p.i, levelName:lvName(p.i), pct:p.pct, orderId:id, fromUid:od.claimedBy, balanceAfter:nb, createdAt:fb.serverTimestamp() });
+    const doRef = list.length > 0 && !od.refReversed;
+    const reads = [];
+    if (doRef) for (const p of list) { const ref = fb.doc(db,"users",p.uid), ps = await t.get(ref); if (ps.exists()) reads.push({ p, ref, d:ps.data() }); }
+    t.update(oRef, { ...base, ...(doRef ? { refReversed:true } : {}), ...(u ? { taskReversed:true } : {}) });
+    reads.forEach(({ p, ref, d }) => {
+      const nb = Math.round((Number(d.balance||0) - Number(p.amount||0)) * 100) / 100;
+      t.update(ref, { balance:nb, refIncome:Math.max(0, Math.round((Number(d.refIncome||0) - Number(p.amount||0)) * 100) / 100) });
+      t.set(fb.doc(fb.collection(db,"users",p.uid,"ledger")), { kind:"referral_reverse", direction:"debit", amount:Number(p.amount||0), level:p.level, levelName:p.name||lvName(p.level), pct:p.pct, orderId:id, fromUid:od.claimedBy, balanceAfter:nb, createdAt:fb.serverTimestamp() });
     });
-    t.update(uRef, { balance:Math.round(((u.balance||0)+od.amount+reward)*100)/100, income:(fresh?0:(u.income||0))+reward, purchaseAmount:(fresh?0:(u.purchaseAmount||0))+od.amount, purchaseOrders:(fresh?0:(u.purchaseOrders||0))+1, statsDate:day });
-    const L = fb.collection(db,"users",od.claimedBy,"ledger");
-    t.set(fb.doc(L,id+"_buy"), { kind:"purchase", amount:od.amount, orderId:id, createdAt:fb.serverTimestamp() });
-    t.set(fb.doc(L,id+"_reward"), { kind:"reward", amount:reward, orderId:id, createdAt:fb.serverTimestamp() });
+    if (!u) return null;
+    const tasks = Math.max(0, (Number(u.taskDone)||0) - 1), tamt = Math.max(0, round2((Number(u.taskAmount)||0) - Number(od.amount||0)));
+    t.update(uRef, { taskDone:tasks, taskAmount:tamt });
+    return { uid:od.claimedBy, name:maskName(u.phone, u.email), joinedAt:u.createdAt||null, tasks, amount:tamt, active:u.refActive === true, need:Math.max(1, Number(rd.activeTasks)||30), chain:chain.map(c=>({ uid:c.uid, i:c.i })) };
   });
+  if (res) await syncTeam(res);
+}
+
+/* One-time tool: rebuild task counts + My Team lists for everybody from the Success orders. Pays no bonus. */
+async function rebuildTeam(){
+  if (DEMO) return toast("Not available in demo mode");
+  if (!confirm("Rebuild team stats from all Success tasks? This fixes task counts and the My Team lists (A, B, C ...). It does NOT pay any bonus.")) return;
+  const c = refCfg(), need = c.activeTasks, n = c.levels.length, byId = {}, cnt = {}, ops = [];
+  S.users.forEach(u => { byId[u.id] = u; });
+  S.orders.forEach(o => { if (o.claimedBy && OS(o) === "success") { const k = cnt[o.claimedBy] || (cnt[o.claimedBy] = { n:0, sum:0 }); k.n++; k.sum += Number(o.amount||0); } });
+  S.users.forEach(u => {
+    const k = cnt[u.id] || { n:0, sum:0 }, sum = round2(k.sum), act = u.refActive === true || k.n >= need;
+    if ((Number(u.taskDone)||0) !== k.n || round2(u.taskAmount) !== sum || (act && u.refActive !== true)) {
+      const d = { taskDone:k.n, taskAmount:sum }; if (act && u.refActive !== true) d.refActive = true;
+      ops.push([fb.doc(db,"users",u.id), d, false]);
+    }
+    const seen = new Set([u.id]); let cur = u.referredBy;
+    for (let i = 0; i < n && cur && !seen.has(cur) && byId[cur]; i++) {
+      seen.add(cur);
+      ops.push([fb.doc(db,"users",cur,"team",u.id), { name:maskName(u.phone, u.email), level:i, tasks:k.n, amount:sum, active:act, need, ...(u.createdAt ? { joinedAt:u.createdAt } : {}) }, true]);
+      cur = byId[cur].referredBy;
+    }
+  });
+  try {
+    for (let i = 0; i < ops.length; i += 400) {
+      const b = fb.writeBatch(db);
+      ops.slice(i, i+400).forEach(([ref, d, merge]) => merge ? b.set(ref, d, { merge:true }) : b.update(ref, d));
+      await b.commit();
+    }
+    toast("Team stats rebuilt ("+ops.length+" updates)");
+  } catch(e) { toast("Rebuild failed: "+(e.code||e.message)); }
 }
 
 async function setStatus(id, ns){
@@ -788,12 +943,13 @@ async function setStatus(id, ns){
   if (ns === "open" && cur === "success") return toast("A successful order cannot be released");
   const msg = ns === "success" ? "Mark SUCCESS? This adds "+fmt(o.amount)+" BDT + "+fmt(Math.round(o.amount*o.rate)/100)+" BDT reward to the user's balance (only once). Referral commission is also paid to the uplines automatically (see Refer program)."
     : ns === "open" ? "Release this order back to the pool? The user's claim will be removed."
-    : "Change status to "+LBL[ns]+"?"+(cur === "success" ? " The balance already added to the user stays (adjust it in Users if needed)." : "");
-  if (!confirm(msg)) { render(); return; }
+    : "Change status to "+LBL[ns]+"?"+(cur === "success" ? " The balance already added to the user stays (adjust it in Users if needed)." : "")+(ns === "failed" && (o.refPaid||[]).length && !o.refReversed ? " The referral commission already paid to the uplines will be TAKEN BACK." : "");
+  if (ns !== "success" && !confirm(msg)) { render(); return; }   /* Success needs no popup: money + referral commission are added automatically */
   const entry = { status:ns, by:"admin", admin:(auth?.currentUser?.email)||"admin", at:Date.now(), note:"Status changed by admin" };
   try {
     if (DEMO) { o.status = ns; if (ns === "open") { o.claimedBy = null; o.payMethod = null; } o.history = [...(o.history||[]), entry]; render(); return toast("Status: "+LBL[ns]); }
     if (ns === "success") await creditSuccess(id, entry);
+    else if (ns === "failed" && (((o.refPaid||[]).length && !o.refReversed) || ((o.credited || cur === "success") && !o.taskReversed))) await reverseRef(id, entry);
     else {
       const d = { status:ns, reviewedAt:fb.serverTimestamp(), history:fb.arrayUnion(entry) };
       if (o.status === "done" || o.status === "claimed") d.credited = true;   /* old approved orders were already credited */
@@ -811,11 +967,11 @@ async function createSell(){
   if (!/^01\d{9}$/.test(num)) return toast("Receive number must be 11 digits starting with 01");
   if (amt > Number(u.balance||0)) return toast("User balance is not enough");
   if (!confirm("Create sell order of "+fmt(amt)+" BDT for "+(uName(u)||u.id.slice(0,6))+"?\n"+fmt(amt)+" BDT will be cut from their balance now and sent to "+payName(f.m)+" "+num+" (Processing).")) return;
-  const hist = [{ status:"processing", by:"admin", admin:adminEmail(), at:Date.now(), note:"Sell order created by admin" }];
+  const hist = [{ status:"processing", by:"admin", admin:adminEmail(), at:Date.now(), note:"Sell order created by admin" }], sellNo = newSellNo();
   try {
     if (DEMO) {
       u.balance = Math.round((Number(u.balance||0)-amt)*100)/100;
-      S.sells.unshift({ id:String(Date.now()), userId:u.id, amount:amt, method:f.m, number:num, status:"processing", createdAt:Date.now(), history:hist });
+      S.sells.unshift({ id:String(Date.now()), orderNo:sellNo, userId:u.id, amount:amt, method:f.m, number:num, status:"processing", createdAt:Date.now(), history:hist });
     } else {
       await fb.runTransaction(db, async t => {
         const uRef = fb.doc(db,"users",u.id), us = await t.get(uRef);
@@ -824,12 +980,12 @@ async function createSell(){
         if (amt > cur) throw new Error("User balance is not enough");
         const nb = Math.round((cur-amt)*100)/100, sRef = fb.doc(fb.collection(db,"sellOrders"));
         t.update(uRef, { balance:nb });
-        t.set(sRef, { userId:u.id, amount:amt, method:f.m, number:num, status:"processing", createdAt:fb.serverTimestamp(), history:hist });
+        t.set(sRef, { orderNo:sellNo, userId:u.id, amount:amt, method:f.m, number:num, status:"processing", createdAt:fb.serverTimestamp(), history:hist });
         t.set(fb.doc(fb.collection(db,"users",u.id,"ledger")), { kind:"withdraw", direction:"debit", amount:amt, orderId:sRef.id, balanceAfter:nb, by:adminEmail(), createdAt:fb.serverTimestamp() });
       });
     }
   } catch(e) { console.error(e); return toast(e.message || "Create sell order failed"); }
-  S.sellForm = { u:"", a:"", m:"bkash", n:"", q:"" }; S.swl = null; render(); toast("Sell order created. Balance cut.");
+  S.sellForm = { u:"", a:"", m:"bkash", n:"", q:"" }; S.swl = null; render(); toast("Sell order created. Order ID: "+sellNo+". Balance cut.");
 }
 
 async function setSellStatus(id, ns){
@@ -880,7 +1036,7 @@ function showSellHistory(id){
   const o = S.sells.find(x=>x.id===id); if (!o) return;
   const ev = (o.history||[]).map(h => ({ at:h.at||0, t:(h.by==="admin" ? "Admin"+(h.admin ? " ("+h.admin+")" : "") : "User "+userLabel(h.uid||o.userId))+" → "+(SL[h.status]||h.status)+(h.note ? " — "+h.note : "") })).sort((a,b)=>a.at-b.at);
   const m = modal(`<h2>Sell history · ${fmt(o.amount)} BDT</h2>
-  <div class="box" style="margin-top:10px;padding:10px 14px;font-size:13px;line-height:1.7">Status: <span class="tag ${STC[o.status]||""}">${esc(SL[o.status]||o.status)}</span>${o.refunded ? ' <span class="tag cr">Refunded</span>' : ""}<br>User: <b>${esc(userLabel(o.userId))}</b><br>Wallet: <b>${esc(payName(o.method))}</b> · <b>${esc(o.number)}</b></div>
+  <div class="box" style="margin-top:10px;padding:10px 14px;font-size:13px;line-height:1.7">Status: <span class="tag ${STC[o.status]||""}">${esc(SL[o.status]||o.status)}</span>${o.refunded ? ' <span class="tag cr">Refunded</span>' : ""}<br>Order ID: <b>${esc(sNo(o))}</b><br>User: <b>${esc(userLabel(o.userId))}</b><br>Wallet: <b>${esc(payName(o.method))}</b> · <b>${esc(o.number)}</b></div>
   <div style="margin-top:14px">${ev.length ? ev.map(e=>`<div style="padding:9px 0;border-bottom:1px solid var(--line);font-size:14px"><div style="color:var(--mute);font-size:12px">${esc(fdt(e.at))}</div>${esc(e.t)}</div>`).join("") : `<div style="color:var(--mute)">No history yet.</div>`}</div>
   <button class="out" id="shc" style="margin-top:16px;width:100%">Close</button>`);
   $("#shc").onclick = () => m.remove();
@@ -980,7 +1136,7 @@ function balanceModal(id){
     const r = S.reasons.find(x=>x.id===rid);
     if (!(amt > 0)) return toast("Enter an amount greater than 0");
     if (!r) return toast("Choose a reason (add reasons in Settings)");
-    const wd = dir==="cut" && isWd(r), wm = $("#ba_wm").value, wn = $("#ba_wn").value.trim();
+    const wd = dir==="cut" && isWd(r), wdNo = wd ? newSellNo() : "", wm = $("#ba_wm").value, wn = $("#ba_wn").value.trim();
     if (wd && !/^01\d{9}$/.test(wn)) return toast("Enter the user's 11-digit wallet number (01XXXXXXXXX)");
     if (!confirm((dir==="add" ? "Add " : "Cut ")+fmt(amt)+" BDT "+(dir==="add" ? "to " : "from ")+uName(u)+"\nReason: "+r.label+"?")) return;
     const entry = { kind:"adjust", direction:dir==="add"?"credit":"debit", amount:amt, reason:r.label, reasonId:r.id, note, by:adminEmail() };
@@ -988,7 +1144,7 @@ function balanceModal(id){
       if (DEMO) {
         const nb = Number(u.balance||0) + (dir==="add" ? amt : -amt); if (nb < 0) throw new Error("Balance is not enough");
         u.balance = nb; u._ledger = [{ ...entry, balanceAfter:nb, createdAt:Date.now() }, ...(u._ledger||[])];
-        if (wd) S.sells.unshift({ id:String(Date.now()), userId:id, amount:amt, method:wm, number:wn, status:"processing", createdAt:Date.now(), history:[{ status:"processing", by:"admin", admin:adminEmail(), at:Date.now(), note:"Created by admin (balance cut)" }] });
+        if (wd) S.sells.unshift({ id:String(Date.now()), orderNo:wdNo, userId:id, amount:amt, method:wm, number:wn, status:"processing", createdAt:Date.now(), history:[{ status:"processing", by:"admin", admin:adminEmail(), at:Date.now(), note:"Created by admin (balance cut)" }] });
       } else {
         await fb.runTransaction(db, async t => {
           const uRef = fb.doc(db,"users",id), us = await t.get(uRef);
@@ -998,10 +1154,10 @@ function balanceModal(id){
           t.update(uRef, { balance:nb });
           const sRef = fb.doc(fb.collection(db,"sellOrders"));
           t.set(fb.doc(fb.collection(db,"users",id,"ledger")), { ...entry, ...(wd ? { orderId:sRef.id } : {}), balanceAfter:nb, createdAt:fb.serverTimestamp() });
-          if (wd) t.set(sRef, { userId:id, amount:amt, method:wm, number:wn, status:"processing", createdAt:fb.serverTimestamp(), history:[{ status:"processing", by:"admin", admin:adminEmail(), at:Date.now(), note:"Created by admin (balance cut)" }] });
+          if (wd) t.set(sRef, { orderNo:wdNo, userId:id, amount:amt, method:wm, number:wn, status:"processing", createdAt:fb.serverTimestamp(), history:[{ status:"processing", by:"admin", admin:adminEmail(), at:Date.now(), note:"Created by admin (balance cut)" }] });
         });
       }
-      m.remove(); render(); toast(wd ? "Balance cut and sent to Sell orders" : "Balance updated");
+      m.remove(); render(); toast(wd ? "Balance cut and sent to Sell orders (Order ID: "+wdNo+")" : "Balance updated");
     } catch(e) { console.error(e); toast(e.message || "Failed"); }
   };
 }
@@ -1022,8 +1178,8 @@ async function userHistory(id){
       rows.sort((a,b)=>tms(b.createdAt)-tms(a.createdAt));
     }
   } catch(e) { $("#uh_b").textContent = "Could not load: "+(e.code||e.message); return; }
-  const lab = l => l.kind==="signup_bonus" ? "Sign up bonus" : l.kind==="transfer_out" ? "Transfer sent" : l.kind==="transfer_in" ? "Transfer received" : l.kind==="redeem" ? "Redeem code ("+(l.code||"")+")" : l.kind==="withdraw" ? "Sell / Withdraw" : l.kind==="withdraw_refund" ? "Withdraw refund" : l.kind==="adjust" ? (l.reason||"Balance adjustment") : l.kind==="referral" ? "Referral commission ("+(l.levelName||"")+")" : l.kind==="reward" ? "Task reward" : "Order amount";
-  const row = l => { const deb = (l.kind==="adjust" && l.direction==="debit") || l.kind==="withdraw" || l.kind==="transfer_out"; return `<div style="padding:9px 0;border-bottom:1px solid var(--line);font-size:14px;display:flex;gap:10px"><div style="flex:1"><b>${esc(lab(l))}</b>${l.note ? `<div>${esc(l.note)}</div>` : ""}<div style="color:var(--mute);font-size:12px">${esc(fdt(tms(l.createdAt)))}${l.by ? " · by "+esc(l.by) : ""}${l.balanceAfter!=null ? " · balance after "+fmt(l.balanceAfter) : ""}</div></div><b style="color:${deb?"var(--red)":"var(--g)"}">${deb?"−":"+"}${fmt(l.amount)}</b></div>`; };
+  const lab = l => l.kind==="referral_bonus" ? "Active referral bonus" : l.kind==="signup_bonus" ? "Sign up bonus" : l.kind==="transfer_out" ? "Transfer sent" : l.kind==="transfer_in" ? "Transfer received" : l.kind==="redeem" ? "Redeem code ("+(l.code||"")+")" : l.kind==="withdraw" ? "Sell / Withdraw" : l.kind==="withdraw_refund" ? "Withdraw refund" : l.kind==="adjust" ? (l.reason||"Balance adjustment") : l.kind==="referral_reverse" ? "Referral commission taken back ("+(l.levelName||"")+")" : l.kind==="referral" ? "Referral commission ("+(l.levelName||"")+")" : l.kind==="reward" ? "Task reward" : "Order amount";
+  const row = l => { const deb = (l.kind==="adjust" && l.direction==="debit") || l.kind==="withdraw" || l.kind==="transfer_out" || l.kind==="referral_reverse"; return `<div style="padding:9px 0;border-bottom:1px solid var(--line);font-size:14px;display:flex;gap:10px"><div style="flex:1"><b>${esc(lab(l))}</b>${l.note ? `<div>${esc(l.note)}</div>` : ""}<div style="color:var(--mute);font-size:12px">${esc(fdt(tms(l.createdAt)))}${l.by ? " · by "+esc(l.by) : ""}${l.balanceAfter!=null ? " · balance after "+fmt(l.balanceAfter) : ""}</div></div><b style="color:${deb?"var(--red)":"var(--g)"}">${deb?"−":"+"}${fmt(l.amount)}</b></div>`; };
   const log = (u.statusLog||[]).slice().sort((a,b)=>b.at-a.at).map(e=>`<div style="padding:7px 0;border-bottom:1px solid var(--line);font-size:13px"><span class="tag ${ACC_TC[e.status]||""}">${esc(ACC[e.status]||e.status)}</span> ${esc(e.note||"")}<div style="color:var(--mute);font-size:12px">${esc(fdt(e.at))} · ${esc(e.by||"")}</div></div>`).join("");
   $("#uh_b").style.color = "inherit";
   $("#uh_b").innerHTML = `<h3 style="font-size:15px;margin-bottom:4px">Balance history</h3>${rows.length ? rows.map(row).join("") : `<div style="color:var(--mute)">No records yet.</div>`}${log ? `<h3 style="font-size:15px;margin:16px 0 4px">Account status log</h3>${log}` : ""}`;
@@ -1049,6 +1205,11 @@ document.addEventListener("click", async e=>{
   else if ("apply" in d) { const sel = $("#st_"+d.apply); if (sel) setStatus(d.apply, sel.value); }
   else if ("hist" in d) showHistory(d.hist);
   else if ("shist" in d) showSellHistory(d.shist);
+  else if ("scopy" in d) {
+    const o = S.sells.find(x=>x.id===d.scopy); if (!o) return;
+    const u = S.users.find(x=>x.id===o.userId);
+    await copyOrShow("Order ID: "+sNo(o)+"\nAmount: "+fmt(o.amount)+"\nWallet method: "+payName(o.method)+"\nWallet number: "+(o.number||"")+"\nUser refer code: "+((u&&u.code)||"-"), "Order details copied");
+  }
   else if ("addsell" in d) createSell();
   else if ("sfpick" in d) window.sfUser(d.sfpick);
   else if ("sfclear" in d) { S.sellForm.u = ""; S.sellForm.n = ""; S.sellForm.q = ""; S.swl = null; render(); }
@@ -1067,6 +1228,7 @@ document.addEventListener("click", async e=>{
     try { await saveReasons(); render(); toast("Reason added"); } catch(e) { S.reasons = prev; render(); toast("Failed: "+(e.code||e.message)); }
   }
   else if ("saveref" in d) { const c = collectRef(); await saveRef(c, "Refer program saved"); }
+  else if ("rfrebuild" in d) await rebuildTeam();
   else if ("addlv" in d) { const c = collectRef(); if (c.levels.length >= 10) return toast("Maximum 10 levels"); c.levels.push({ pct:0, on:true }); await saveRef(c, lvName(c.levels.length-1)+" added. Set its % and save."); }
   else if ("rfdel" in d) { const c = collectRef(); if (c.levels.length < 2) return; if (!confirm("Remove "+lvName(c.levels.length-1)+"? Past commissions stay in history.")) return; c.levels.pop(); await saveRef(c, "Level removed"); }
   else if ("dotransfer" in d) doTransfer();
