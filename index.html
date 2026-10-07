@@ -119,7 +119,7 @@ const admManaged = d => d.managed === true || "createdBy" in d;
 const admRole = d => admManaged(d) ? (d.role || "viewer") : "owner";
 const isOwner = () => !S.me || S.me.role === "owner";
 const isViewer = () => !!S.me && S.me.role === "viewer";
-const can = t => isOwner() || (t !== "adminmgr" && Array.isArray(S.me.perms) && S.me.perms.includes(t));
+const can = t => isOwner() || (t !== "adminmgr" && t !== "activity" && Array.isArray(S.me.perms) && S.me.perms.includes(t));
 const firstAllowed = () => { const x = ADM_TABS.find(t => can(t[0])); return x ? x[0] : "dash"; };
 /* ---------- Online / last seen (user app writes lastSeenAt about every 60 seconds while open) ---------- */
 const ONLINE_MS = 150000;   /* online = seen in the last 2.5 minutes */
@@ -151,7 +151,7 @@ S.sup = [];
 S.rcodes = [];
 S.transfers = [];
 S.tf = { fq:"", tq:"", a:"", n:"" };
-S.ipq = ""; S.me = null; S.admins = []; S.am = { e:"", p:"", r:"admin", perms:ADM_PRESET.admin.slice() }; S.ttab = "new"; S.tfs = ""; S.tfd = "0"; S.transferLimit = 0; S.bonus = 0;
+S.ipq = ""; S.actLog = []; S.acCat = "all"; S.acAdm = "all"; S.acQ = ""; S.acD = "all"; S.me = null; S.admins = []; S.am = { e:"", p:"", r:"admin", perms:ADM_PRESET.admin.slice() }; S.ttab = "new"; S.tfs = ""; S.tfd = "0"; S.transferLimit = 0; S.bonus = 0;
 S.rc = { amount:"", code:"", target:"all", ref:"", max:"" };
 /* Refer program: level i = the i-th person above the user who finished the task (A = direct referrer, B = referrer of A ...) */
 S.refCfg = null;
@@ -510,7 +510,7 @@ function collectRef(){
   return c;
 }
 async function saveRef(c, msg){
-  try { if (!DEMO) await fb.setDoc(fb.doc(db,"settings","referral"), c); S.refCfg = c; render(); toast(msg || "Saved"); }
+  try { if (!DEMO) await fb.setDoc(fb.doc(db,"settings","referral"), c); S.refCfg = c; logAct("settings", msg || "Refer program saved", "Refer program"); render(); toast(msg || "Saved"); }
   catch(e) { toast("Failed: "+(e.code||e.message)); }
 }
 
@@ -612,6 +612,7 @@ async function createRC(){
   } catch(e) { console.error(e); return toast(e.message || "Create failed"); }
   S.rc = { amount:"", code:"", target:"all", ref:"", max:"" };
   const copied = await copyText(code);
+  logAct("redeem","Created redeem code "+code+" · "+fmt(amt)+" BDT · "+(f.target==="user" ? "for "+data.userName+" ("+data.userCode+")" : "all users"), code);
   render(); toast("Code created: "+code+(copied ? " (copied)" : ""));
 }
 
@@ -688,6 +689,7 @@ async function doTransfer(){
       t.set(fb.doc(fb.collection(db,"transfers")), { from:a.id, to:b.id, fromCode:a.code||"", toCode:b.code||"", fromName:uName(a)||"", toName:uName(b)||"", amount:amt, note, fromAfter:an, toAfter:bn, by:adminEmail(), createdAt:fb.serverTimestamp() });
     });
   } catch(e) { console.error(e); return toast(e.message || "Transfer failed"); }
+  logAct("transfer","Transferred "+fmt(amt)+" BDT from "+(uName(a)||a.id.slice(0,6))+" ("+a.code+") to "+(uName(b)||b.id.slice(0,6))+" ("+b.code+")"+(note ? " · "+note : ""), "");
   S.tf = { fq:"", tq:"", a:"", n:"" }; render(); toast("Transferred "+fmt(amt)+" BDT");
 }
 
@@ -710,6 +712,7 @@ async function removeUserWallet(spec){
       if (ks.exists() && ks.data().uid === uid) b.delete(kRef);
       await b.commit();
     }
+    logAct("delete","Removed "+payName(type)+" wallet "+number+" of a user", number);
     toast("Wallet removed"); loadEuWallets(uid);
   } catch(e) { console.error(e); toast("Failed: "+(e.code||e.message)); }
 }
@@ -847,7 +850,7 @@ async function bkRestore(data, say){
 async function bkBackupClick(){
   if (DEMO) return toast("Backup is not available in demo mode");
   const m = bkProg("Creating backup");
-  try { const data = await bkCollect(m.say); const name = bkDownload(data); m.done("✓ Backup downloaded:\n"+name+"\n\n"+bkSummary(data)+"\n\nFind it in your phone's Downloads folder (File Manager)."); }
+  try { const data = await bkCollect(m.say); const name = bkDownload(data); logAct("data","Downloaded a backup file", name); m.done("✓ Backup downloaded:\n"+name+"\n\n"+bkSummary(data)+"\n\nFind it in your phone's Downloads folder (File Manager)."); }
   catch (e) { console.error(e); m.fail(e.code || e.message); }
 }
 function bkWipeModal(){
@@ -860,7 +863,7 @@ window.bkGoWipe = async btn => {
   let name;
   try { const data = await bkCollect(t => m.say("Step 1/2: saving backup\n"+t)); name = bkDownload(data); }
   catch (e) { console.error(e); return m.fail("Backup failed, nothing was deleted. ("+(e.code || e.message)+")"); }
-  try { await bkWipe(t => m.say("Step 2/2: deleting data\n"+t), true); m.done("✓ All data deleted. User accounts are kept.\n\nBackup file: "+name+"\nKeep it safe. Use Settings → Restore to bring the data back."); }
+  try { await bkWipe(t => m.say("Step 2/2: deleting data\n"+t), true); logAct("data","Deleted ALL data (accounts kept). Backup: "+name, "Delete all data"); m.done("✓ All data deleted. User accounts are kept.\n\nBackup file: "+name+"\nKeep it safe. Use Settings → Restore to bring the data back."); }
   catch (e) { console.error(e); m.fail((e.code || e.message)+"\nSome data may already be deleted. Your backup file ("+name+") is saved, use Restore to put everything back."); }
 };
 let BK_PENDING = null;
@@ -874,7 +877,7 @@ window.bkPick = async inp => {
 window.bkGoRestore = async btn => {
   const m0 = btn.closest(".modal"); if (m0.querySelector("#bk_c").value.trim() !== "RESTORE") return toast("Type RESTORE exactly");
   m0.remove(); const m = bkProg("Restoring backup"), data = BK_PENDING; if (!data) return m.fail("No file loaded");
-  try { const r = await bkRestore(data, m.say); m.done("✓ Restore finished."+(r.skipped ? "\n"+r.skipped+" account(s) in the file no longer exist and were skipped." : "")+(r.fails ? "\n⚠ "+r.fails+" item(s) could not be written. Check that the latest Firestore rules are published, then run Restore again." : "")); }
+  try { const r = await bkRestore(data, m.say); logAct("data","Restored a backup from "+fdt(Date.parse(data.createdAt))+(r.fails ? " ("+r.fails+" items failed)" : ""), "Restore"); m.done("✓ Restore finished."+(r.skipped ? "\n"+r.skipped+" account(s) in the file no longer exist and were skipped." : "")+(r.fails ? "\n⚠ "+r.fails+" item(s) could not be written. Check that the latest Firestore rules are published, then run Restore again." : "")); }
   catch (e) { console.error(e); m.fail((e.code || e.message)+"\nYou can run Restore again with the same file."); }
   BK_PENDING = null;
 };
@@ -914,6 +917,7 @@ async function createAdmin(){
     const c = await fb.createUserWithEmailAndPassword(a2, email, pw); uid = c.user.uid;
     await fb.setDoc(fb.doc(db,"admins",uid), { email, role:f.r, perms:f.perms.slice(), active:true, managed:true, createdAt:fb.serverTimestamp(), createdBy:adminEmail() });
     try { await fb.signOut(a2); } catch {}
+    logAct("admin","Created "+(ADM_ROLE[f.r]||f.r)+" account "+email+" ("+f.perms.length+" sections)", email);
     S.am = { e:"", p:"", r:"admin", perms:ADM_PRESET.admin.slice() }; render(); toast("Account created: "+email);
   } catch (e) {
     console.error(e);
@@ -928,18 +932,59 @@ window.amEditRole = sel => { const p = ADM_PRESET[sel.value] || []; sel.closest(
 window.amSave = async (id, btn) => {
   const m = btn.closest(".modal"), role = m.querySelector("#am_er").value, perms = [...m.querySelectorAll(".am_mc")].filter(c => c.checked).map(c => c.value);
   if (!perms.length) return toast("Tick at least one section");
-  try { if (DEMO) { const a = S.admins.find(x=>x.id===id); if (a) { a.role = role; a.perms = perms; } } else await fb.updateDoc(fb.doc(db,"admins",id), { role, perms }); m.remove(); render(); toast("Saved"); } catch (e) { toast("Failed: "+(e.code||e.message)); }
+  try { if (DEMO) { const a = S.admins.find(x=>x.id===id); if (a) { a.role = role; a.perms = perms; } } else await fb.updateDoc(fb.doc(db,"admins",id), { role, perms }); logAct("admin","Changed access of "+((S.admins.find(x=>x.id===id)||{}).email||id)+": "+(ADM_ROLE[role]||role)+", "+perms.length+" sections", (S.admins.find(x=>x.id===id)||{}).email||""); m.remove(); render(); toast("Saved"); } catch (e) { toast("Failed: "+(e.code||e.message)); }
 };
 async function amToggle(id){
   const a = S.admins.find(x => x.id === id); if (!a) return; const nx = a.active === false;
   if (!confirm((nx ? "Enable " : "Disable ")+(a.email||id)+"?")) return;
-  try { if (DEMO) a.active = nx; else await fb.updateDoc(fb.doc(db,"admins",id), { active:nx }); render(); toast(nx ? "Enabled" : "Disabled"); } catch (e) { toast("Failed: "+(e.code||e.message)); }
+  try { if (DEMO) a.active = nx; else await fb.updateDoc(fb.doc(db,"admins",id), { active:nx }); logAct("admin",(nx ? "Enabled" : "Disabled")+" admin account "+(a.email||id), a.email||""); render(); toast(nx ? "Enabled" : "Disabled"); } catch (e) { toast("Failed: "+(e.code||e.message)); }
 }
 async function amDelete(id){
   const a = S.admins.find(x => x.id === id); if (!a) return;
   if (!confirm("Delete admin "+(a.email||id)+"? They will not be able to open this panel any more.")) return;
-  try { if (DEMO) S.admins = S.admins.filter(x => x.id !== id); else await fb.deleteDoc(fb.doc(db,"admins",id)); render(); toast("Deleted"); } catch (e) { toast("Failed: "+(e.code||e.message)); }
+  try { if (DEMO) S.admins = S.admins.filter(x => x.id !== id); else await fb.deleteDoc(fb.doc(db,"admins",id)); logAct("admin","Deleted admin account "+(a.email||id), a.email||""); render(); toast("Deleted"); } catch (e) { toast("Failed: "+(e.code||e.message)); }
 }
+
+/* ---------- Admin activity log (who did what). Saved in the adminLogs collection, only the owner can read it ---------- */
+const ACT_CATS = [["login","Login"],["task_create","Task created"],["withdraw_create","Withdraw created"],["pending","Pending"],["success","Success"],["failed","Failed"],["lock","Lock"],["bal_add","Balance added"],["bal_cut","Balance cut"],["ban","Ban"],["unban","Unban"],["transfer","Transfer"],["user_edit","User edit"],["delete","Delete"],["redeem","Redeem codes"],["settings","Settings"],["admin","Admin manage"],["data","Backup / Restore"]];
+const actName = c => (ACT_CATS.find(x => x[0] === c) || [c, c])[1];
+const actTag = c => ["failed","ban","lock","delete","bal_cut"].includes(c) ? "x" : ["pending","transfer"].includes(c) ? "fz" : ["success","bal_add","unban","task_create","withdraw_create"].includes(c) ? "" : "off";
+const stCat = ns => ns === "success" ? "success" : ns === "failed" ? "failed" : ns === "lock" ? "lock" : "pending";
+const accCat = ns => ns === "active" ? "unban" : (ns === "banned" || ns === "suspended") ? "ban" : "lock";
+function logAct(cat, text, target){
+  try {
+    const me = adminEmail(), role = (S.me && S.me.role) || "owner";
+    if (DEMO) { S.actLog.unshift({ id:String(Date.now()+Math.random()), at:Date.now(), admin:me, role, cat, text:String(text), target:String(target||"") }); return; }
+    const uid = auth && auth.currentUser && auth.currentUser.uid; if (!uid) return;
+    fb.addDoc(fb.collection(db,"adminLogs"), { at:fb.serverTimestamp(), uid, admin:me, role, cat, text:String(text).slice(0,300), target:String(target||"").slice(0,80) }).catch(e => console.warn("activity log failed", e));
+  } catch (e) { console.warn(e); }
+}
+function actFiltered(ignoreCat){
+  const q = String(S.acQ||"").trim().toLowerCase(), now = Date.now(), ds = new Date().setHours(0,0,0,0);
+  const from = S.acD === "all" ? 0 : S.acD === "0" ? ds : now - Number(S.acD) * 86400000;
+  return S.actLog.filter(l => (S.acAdm === "all" || l.admin === S.acAdm) && (tms(l.at) || now) >= from && (ignoreCat || S.acCat === "all" || l.cat === S.acCat)
+    && (!q || (String(l.text||"")+" "+String(l.target||"")+" "+String(l.admin||"")).toLowerCase().includes(q)));
+}
+function actBody(){
+  const base = actFiltered(true), cnt = {}; base.forEach(l => { cnt[l.cat] = (cnt[l.cat]||0) + 1; });
+  const list = S.acCat === "all" ? base : base.filter(l => l.cat === S.acCat), shown = list.slice(0, 200);
+  const chip = (k, l, n) => `<button class="sm ${S.acCat===k?"":"out"}" style="margin:0 6px 6px 0" onclick="window.acSet('cat','${k}')">${esc(l)} <b>${n}</b></button>`;
+  const rows = shown.map(l => `<tr><td style="white-space:nowrap">${esc(fdt(tms(l.at)))}</td><td>${esc(l.admin||"-")}<br><span style="font-size:11px;color:var(--mute)">${esc(ADM_ROLE[l.role]||l.role||"")}</span></td><td><span class="tag ${actTag(l.cat)}">${esc(actName(l.cat))}</span></td><td style="white-space:normal;min-width:220px">${esc(l.text||"")}${l.target ? `<br><span style="font-size:12px;color:var(--mute)">${esc(l.target)}</span>` : ""}</td></tr>`).join("");
+  return `<div style="margin:10px 0 4px">${chip("all","All",base.length)}${ACT_CATS.map(c => chip(c[0], c[1], cnt[c[0]]||0)).join("")}</div>
+  <div style="overflow-x:auto"><table><thead><tr><th>Time</th><th>Admin</th><th>Category</th><th>Details</th></tr></thead><tbody>${rows || `<tr><td colspan="4" style="color:var(--mute)">No activity found.</td></tr>`}</tbody></table></div>
+  ${list.length > shown.length ? `<p style="font-size:12px;color:var(--mute);margin-top:8px">Showing the latest ${shown.length} of ${list.length}. Use the filters to narrow down.</p>` : ""}`;
+}
+function activity(){
+  const admins = [...new Set(S.actLog.map(l => l.admin).filter(Boolean))].sort();
+  const dOpt = (v,l) => `<option value="${v}" ${S.acD===v?"selected":""}>${l}</option>`;
+  return `<h1>Admin activity</h1><div class="box">
+  <p style="font-size:13px;color:var(--mute);line-height:1.5;margin-bottom:10px">Every action of every admin is saved here: who did it, what, and when. Pick a category to see only that kind of activity. Only the owner can see this page.</p>
+  <div class="form"><div><label>Admin</label><select onchange="window.acSet('adm',this.value)"><option value="all">All admins</option>${admins.map(a => `<option value="${esc(a)}" ${S.acAdm===a?"selected":""}>${esc(a)}</option>`).join("")}</select></div>
+  <div><label>Date</label><select onchange="window.acSet('d',this.value)">${dOpt("all","All time")}${dOpt("0","Today")}${dOpt("1","Last 24 hours")}${dOpt("7","Last 7 days")}${dOpt("30","Last 30 days")}</select></div>
+  <div><label>Search</label><input id="ac_q" placeholder="Email, user, order ID..." autocomplete="off" value="${esc(S.acQ)}" oninput="window.acSet('q',this.value)"></div></div>
+  <div id="ac_wrap">${actBody()}</div></div>`;
+}
+window.acSet = (k, v) => { if (k === "cat") S.acCat = v; else if (k === "adm") S.acAdm = v; else if (k === "d") S.acD = v; else S.acQ = v; const w = $("#ac_wrap"); if (w) w.innerHTML = actBody(); };
 
 const navSnap = () => ({ t:S.tab, tt:S.tab==="transfer" ? S.ttab : null });
 function navApply(nv){ S.tab = nv.t; if (nv.tt) S.ttab = nv.tt; render(); }
@@ -970,11 +1015,11 @@ window.addEventListener("popstate", e => {
   navLast = JSON.stringify(navSnap());
 });
 function render(){
-  const r = $("#root"), ae = document.activeElement, keepId = ae && (/^(nu_q|ip_q|am_e|am_p|oq|sq|sf_a|sf_n|sf_q|rc_a|rc_c|rc_r|rc_m|tf_f|tf_t|tf_a|tf_n|tf_s|tl_v)$/.test(ae.id)) ? ae.id : null, keepOq = keepId ? ae.selectionStart : null;
+  const r = $("#root"), ae = document.activeElement, keepId = ae && (/^(nu_q|ip_q|ac_q|am_e|am_p|oq|sq|sf_a|sf_n|sf_q|rc_a|rc_c|rc_r|rc_m|tf_f|tf_t|tf_a|tf_n|tf_s|tl_v)$/.test(ae.id)) ? ae.id : null, keepOq = keepId ? ae.selectionStart : null;
   if (!S.admin) { r.innerHTML = login(); return; }
   if (S.tab === "refer" && ae && ((ae.dataset && ae.dataset.rf === "pct") || ae.id === "rf_need" || ae.id === "rf_bonus")) return;   /* do not wipe a % being typed */
   const n=(k,l)=>`<button class="${S.tab===k?"act":""}${can(k)?"":" lckd"}" data-tab="${k}">${l}${can(k)?"":" 🔒"}</button>`;
-  r.innerHTML = `<div class="wrap"><aside><h2>Nova Pay Admin</h2><div class="who">${esc(adminEmail())} · ${esc(ADM_ROLE[(S.me&&S.me.role)||"owner"]||"")}</div>${n("dash","Dashboard")}${n("users","Users")}${n("ipscan","IP scanner")}${n("newu","New users")}${n("orders","Buy orders")}${n("sells","Sell orders")}${n("refer","Refer program")}${n("redeem","Redeem codes")}${n("transfer","Transfer")}${n("settings","Settings")}${n("adminmgr","Admin Manage")}<button data-logout style="margin-top:18px;background:rgba(255,255,255,.18);color:#fff">Log out</button></aside><main>${navIdx>0 ? `<button class="sm out" data-goback style="margin-bottom:10px">‹ Back</button>` : ""}${can(S.tab) ? ({dash,users,ipscan:ipScan,newu:newUsers,orders,sells,refer,redeem,transfer,settings,adminmgr:adminMgr})[S.tab]() : lockedView()}</main></div>`;
+  r.innerHTML = `<div class="wrap"><aside><h2>Nova Pay Admin</h2><div class="who">${esc(adminEmail())} · ${esc(ADM_ROLE[(S.me&&S.me.role)||"owner"]||"")}</div>${n("dash","Dashboard")}${n("users","Users")}${n("ipscan","IP scanner")}${n("newu","New users")}${n("orders","Buy orders")}${n("sells","Sell orders")}${n("refer","Refer program")}${n("redeem","Redeem codes")}${n("transfer","Transfer")}${n("settings","Settings")}${n("adminmgr","Admin Manage")}${n("activity","Admin activity")}<button data-logout style="margin-top:18px;background:rgba(255,255,255,.18);color:#fff">Log out</button></aside><main>${navIdx>0 ? `<button class="sm out" data-goback style="margin-bottom:10px">‹ Back</button>` : ""}${can(S.tab) ? ({dash,users,ipscan:ipScan,newu:newUsers,orders,sells,refer,redeem,transfer,settings,adminmgr:adminMgr,activity})[S.tab]() : lockedView()}</main></div>`;
   navSync();
   if (keepOq !== null) { const el = $("#"+keepId); if (el) { el.focus(); try { el.setSelectionRange(keepOq,keepOq); } catch {} } }
 }
@@ -1011,6 +1056,7 @@ function subscribe(){
       const d = s.data(), nm = { role:admRole(d), perms:d.perms || [] };
       if (JSON.stringify(nm) !== JSON.stringify(S.me)) { S.me = nm; if (!can(S.tab)) S.tab = firstAllowed(); render(); }
     }, ()=>{}));
+    if (isOwner()) unsubs.push(onSnapshot(fb.query(collection(db,"adminLogs"), fb.orderBy("at","desc"), fb.limit(500)), s=>{ S.actLog = s.docs.map(d => ({ id:d.id, ...d.data({ serverTimestamps:"estimate" }) })); if (S.tab === "activity") { const w = $("#ac_wrap"); if (w) w.innerHTML = actBody(); else render(); } }, ()=>{}));
     if (isOwner()) unsubs.push(onSnapshot(collection(db,"admins"), s=>{ S.admins = s.docs.map(d=>({id:d.id,...d.data()})); if (S.tab === "adminmgr") render(); }, ()=>{})); }
   { const iv = setInterval(refreshPresence, 20000); unsubs.push(()=>clearInterval(iv)); }   /* online -> last seen without a page refresh */
 }
@@ -1025,7 +1071,7 @@ async function doLogin(){
     const dd = a.data() || {};
     if (dd.active === false) { await fb.signOut(auth); S.err="This admin account is disabled."; render(); return; }
     S.me = { role: admRole(dd), perms: dd.perms || [] }; S.tab = can(S.tab) ? S.tab : firstAllowed();
-    S.admin=true; subscribe(); render();
+    S.admin=true; subscribe(); render(); logAct("login","Logged in");
   } catch(e) { S.err = e.code==="auth/invalid-credential" ? "Wrong email or password." : e.message; render(); }
 }
 
@@ -1057,6 +1103,7 @@ function editUser(id){
       } catch(e) { return toast("Referral link failed: "+(e.code||e.message)); }
     }
     if (DEMO) Object.assign(u,d); else await fb.updateDoc(fb.doc(db,"users",id),d);
+    logAct("user_edit","Edited user "+uName(u)+" (stats"+(rc ? " + referrer set" : "")+")", u.code||"");
     m.remove(); render(); toast("Saved");
   };
 }
@@ -1077,6 +1124,7 @@ async function addOrder(){
     console.error(e);
     return toast("Create order failed: "+(e.code||e.message)+" | project: "+((db&&db.app&&db.app.options&&db.app.options.projectId)||"?")+" | admin: "+adminEmail());
   }
+  logAct("task_create","Created task "+fmt(o.amount)+" BDT ("+o.type+", rate "+o.rate+"%)"+(sell ? " for withdraw "+sNo(sell) : ""), o.mask);
   render(); toast(sell ? "Order created (Order ID: "+sNo(sell)+")" : "Order created");
 }
 
@@ -1245,7 +1293,7 @@ async function setStatus(id, ns){
   if (ns !== "success" && !confirm(msg)) { render(); return; }   /* Success needs no popup: money + referral commission are added automatically */
   const entry = { status:ns, by:"admin", admin:(auth?.currentUser?.email)||"admin", at:Date.now(), note:"Status changed by admin" };
   try {
-    if (DEMO) { o.status = ns; if (ns === "open") { o.claimedBy = null; o.payMethod = null; } o.history = [...(o.history||[]), entry]; render(); return toast("Status: "+LBL[ns]); }
+    if (DEMO) { o.status = ns; if (ns === "open") { o.claimedBy = null; o.payMethod = null; } o.history = [...(o.history||[]), entry]; logAct(stCat(ns), "Task status changed: "+LBL[cur]+" → "+LBL[ns]+" · "+fmt(o.amount)+" BDT", o.mask||id); render(); return toast("Status: "+LBL[ns]); }
     if (ns === "success") await creditSuccess(id, entry);
     else if (ns === "failed" && (((o.refPaid||[]).length && !o.refReversed) || ((o.credited || cur === "success") && !o.taskReversed))) await reverseRef(id, entry);
     else {
@@ -1254,6 +1302,7 @@ async function setStatus(id, ns){
       if (ns === "open") Object.assign(d, { claimedBy:null, claimedAt:null, payMethod:null, senderNumber:null, trxId:null });
       await fb.updateDoc(fb.doc(db,"buyOrders",id), d);
     }
+    logAct(stCat(ns), "Task status changed: "+LBL[cur]+" → "+LBL[ns]+" · "+fmt(o.amount)+" BDT", o.mask||id);
     toast("Status: "+LBL[ns]);
   } catch(e) { console.error(e); toast(e.message || "Update failed"); render(); }
 }
@@ -1283,6 +1332,7 @@ async function createSell(){
       });
     }
   } catch(e) { console.error(e); return toast(e.message || "Create sell order failed"); }
+  logAct("withdraw_create","Created withdraw "+fmt(amt)+" BDT for "+(uName(u)||u.id.slice(0,6))+" → "+payName(f.m)+" "+num, sellNo);
   S.sellForm = { u:"", a:"", m:"bkash", n:"", q:"" }; S.swl = null; render(); toast("Sell order created. Order ID: "+sellNo+". Balance cut.");
 }
 
@@ -1300,7 +1350,7 @@ async function setSellStatus(id, ns){
     if (DEMO) {
       if (ns==="failed") { const u = S.users.find(x=>x.id===o.userId); if (u) u.balance = Number(u.balance||0)+Number(o.amount||0); o.refunded = true; }
       if (ns==="success") { const u = S.users.find(x=>x.id===o.userId); if (u) { u.saleAmount = Number(u.saleAmount||0)+Number(o.amount||0); u.saleOrders = Number(u.saleOrders||0)+1; } }
-      o.status = ns; o.history = [...(o.history||[]), entry]; render(); return toast("Status: "+SL[ns]);
+      logAct(stCat(ns), "Withdraw status changed: "+SL[o.status]+" → "+SL[ns]+" · "+fmt(o.amount)+" BDT", sNo(o)); o.status = ns; o.history = [...(o.history||[]), entry]; render(); return toast("Status: "+SL[ns]);
     }
     const sRef = fb.doc(db,"sellOrders",id);
     if (ns==="failed") {
@@ -1326,6 +1376,7 @@ async function setSellStatus(id, ns){
     } else {
       await fb.updateDoc(sRef, { status:ns, reviewedAt:fb.serverTimestamp(), history:fb.arrayUnion(entry) });
     }
+    logAct(stCat(ns), "Withdraw status changed: "+SL[o.status]+" → "+SL[ns]+" · "+fmt(o.amount)+" BDT"+(ns==="failed" ? " (refunded)" : ""), sNo(o));
     toast("Status: "+SL[ns]);
   } catch(e) { console.error(e); toast(e.message || "Update failed"); render(); }
 }
@@ -1381,6 +1432,7 @@ function accountModal(id){
     try {
       if (DEMO) Object.assign(u, { accountStatus:ns, disabled:ns!=="active", accountNote:note, statusLog:[...(u.statusLog||[]),entry] });
       else await fb.updateDoc(fb.doc(db,"users",id), { accountStatus:ns, disabled:ns!=="active", accountNote:note, statusAt:fb.serverTimestamp(), statusLog:fb.arrayUnion(entry) });
+      logAct(accCat(ns), (ns==="active" ? "Unbanned / activated " : "Set "+ACC[ns]+": ")+uName(u)+(ns==="active" ? "" : "")+" ("+ACC[cur]+" → "+ACC[ns]+")"+(note ? " · "+note : ""), u.code||"");
       m.remove(); render(); toast("Status: "+ACC[ns]);
     } catch(e) { toast("Failed: "+(e.code||e.message)); }
   };
@@ -1403,6 +1455,7 @@ async function deleteUser(id, m){
       free.forEach(o => b.update(fb.doc(db,"buyOrders",o.id), { status:"open", claimedBy:null, claimedAt:null, payMethod:null, senderNumber:null, trxId:null, history:fb.arrayUnion(oEntry) }));
       await b.commit();
     }
+    logAct("delete","Deleted user account "+label, u.code||"");
     m.remove(); render(); toast("Account deleted");
   } catch(e) { console.error(e); toast("Delete failed: "+(e.code||e.message)); }
 }
@@ -1455,6 +1508,8 @@ function balanceModal(id){
           if (wd) t.set(sRef, { orderNo:wdNo, userId:id, amount:amt, method:wm, number:wn, status:"processing", createdAt:fb.serverTimestamp(), history:[{ status:"processing", by:"admin", admin:adminEmail(), at:Date.now(), note:"Created by admin (balance cut)" }] });
         });
       }
+      logAct(dir==="add" ? "bal_add" : "bal_cut", (dir==="add" ? "Added " : "Cut ")+fmt(amt)+" BDT "+(dir==="add" ? "to " : "from ")+uName(u)+" · "+r.label+(note ? " · "+note : ""), u.code||"");
+      if (wd) logAct("withdraw_create","Created withdraw "+fmt(amt)+" BDT for "+uName(u)+" → "+payName(wm)+" "+wn+" (balance cut)", wdNo);
       m.remove(); render(); toast(wd ? "Balance cut and sent to Sell orders (Order ID: "+wdNo+")" : "Balance updated");
     } catch(e) { console.error(e); toast(e.message || "Failed"); }
   };
@@ -1499,6 +1554,8 @@ document.addEventListener("click", async e=>{
   else if ("addorder" in d) addOrder();
   else if ("delorder" in d) {
     if (!confirm("Delete this order?")) return;
+    const o0 = S.orders.find(o=>o.id===d.delorder);
+    logAct("delete","Deleted task "+(o0 ? fmt(o0.amount)+" BDT" : d.delorder), o0 ? (o0.mask||d.delorder) : d.delorder);
     if (DEMO) S.orders = S.orders.filter(o=>o.id!==d.delorder); else await fb.deleteDoc(fb.doc(db,"buyOrders",d.delorder));
     render(); toast("Deleted");
   }
@@ -1525,7 +1582,7 @@ document.addEventListener("click", async e=>{
     if (!label) return toast("Enter a reason name");
     if (S.reasons.some(r=>r.label.toLowerCase()===label.toLowerCase())) return toast("This reason already exists");
     const prev = S.reasons.slice(); S.reasons.push({ id:"r_"+Date.now().toString(36), label, type });
-    try { await saveReasons(); render(); toast("Reason added"); } catch(e) { S.reasons = prev; render(); toast("Failed: "+(e.code||e.message)); }
+    try { await saveReasons(); logAct("settings","Added balance reason: "+label+" ("+type+")", "Reasons"); render(); toast("Reason added"); } catch(e) { S.reasons = prev; render(); toast("Failed: "+(e.code||e.message)); }
   }
   else if ("saveref" in d) { const c = collectRef(); await saveRef(c, "Refer program saved"); }
   else if ("rfrebuild" in d) await rebuildTeam();
@@ -1537,7 +1594,7 @@ document.addEventListener("click", async e=>{
   else if ("tfhist" in d) userHistory(d.tfhist);
   else if ("savetl" in d) {
     const v = Math.max(0, Math.floor(Number($("#tl_v").value) || 0));
-    try { if (!DEMO) await fb.setDoc(fb.doc(db,"settings","transferLimit"), { perUserPerDay:v }); S.transferLimit = v; render(); toast(v ? "Limit saved: "+fmt(v)+" BDT per user per day" : "Limit removed"); } catch(e) { toast("Failed: "+(e.code||e.message)); }
+    try { if (!DEMO) await fb.setDoc(fb.doc(db,"settings","transferLimit"), { perUserPerDay:v }); S.transferLimit = v; logAct("settings","Transfer limit set to "+(v ? fmt(v)+" BDT per user per day" : "off"), "Transfer"); render(); toast(v ? "Limit saved: "+fmt(v)+" BDT per user per day" : "Limit removed"); } catch(e) { toast("Failed: "+(e.code||e.message)); }
   }
   else if ("rmw" in d) removeUserWallet(d.rmw);
   else if ("wbfill" in d) backfillWalletKeys();
@@ -1553,23 +1610,23 @@ document.addEventListener("click", async e=>{
   else if ("rctoggle" in d) {
     const o = S.rcodes.find(x=>x.id===d.rctoggle); if (!o) return;
     const on = o.active === false;
-    try { if (DEMO) o.active = on; else await fb.updateDoc(fb.doc(db,"redeemCodes",o.id), { active:on }); render(); toast(on ? "Code enabled" : "Code disabled"); } catch(e) { toast("Failed: "+(e.code||e.message)); }
+    try { if (DEMO) o.active = on; else await fb.updateDoc(fb.doc(db,"redeemCodes",o.id), { active:on }); logAct("redeem",(on ? "Enabled" : "Disabled")+" redeem code "+o.id, o.id); render(); toast(on ? "Code enabled" : "Code disabled"); } catch(e) { toast("Failed: "+(e.code||e.message)); }
   }
   else if ("rcdel" in d) {
     if (!confirm("Delete code "+d.rcdel+"? Users who already redeemed it keep their balance and history.")) return;
-    try { if (DEMO) S.rcodes = S.rcodes.filter(x=>x.id!==d.rcdel); else await fb.deleteDoc(fb.doc(db,"redeemCodes",d.rcdel)); render(); toast("Deleted"); } catch(e) { toast("Failed: "+(e.code||e.message)); }
+    try { if (DEMO) S.rcodes = S.rcodes.filter(x=>x.id!==d.rcdel); else await fb.deleteDoc(fb.doc(db,"redeemCodes",d.rcdel)); logAct("redeem","Deleted redeem code "+d.rcdel, d.rcdel); render(); toast("Deleted"); } catch(e) { toast("Failed: "+(e.code||e.message)); }
   }
   else if ("addsup" in d) {
     const type = $("#sut").value, label = $("#sun").value.trim(), url = supUrl(type, $("#sul").value);
     if (!label) return toast("Enter a name");
     if (!url) return toast(type==="telegram" ? "Enter a https:// link or a Telegram @username" : "Enter a https:// link or a WhatsApp number with country code");
     const prev = S.sup.slice(); S.sup.push({ id:"s_"+Date.now().toString(36), type, label, url });
-    try { await saveSup(); render(); toast("Link added"); } catch(e) { S.sup = prev; render(); toast("Failed: "+(e.code||e.message)); }
+    try { await saveSup(); logAct("settings","Added support link: "+label+" ("+type+")", "Support"); render(); toast("Link added"); } catch(e) { S.sup = prev; render(); toast("Failed: "+(e.code||e.message)); }
   }
   else if ("delsup" in d) {
     if (!confirm("Delete this support link?")) return;
     const prev = S.sup.slice(); S.sup = S.sup.filter(x=>x.id!==d.delsup);
-    try { await saveSup(); render(); toast("Deleted"); } catch(e) { S.sup = prev; render(); toast("Failed: "+(e.code||e.message)); }
+    try { await saveSup(); logAct("settings","Deleted a support link", "Support"); render(); toast("Deleted"); } catch(e) { S.sup = prev; render(); toast("Failed: "+(e.code||e.message)); }
   }
   else if ("upsup" in d) {
     const i = S.sup.findIndex(x=>x.id===d.upsup); if (i < 1) return;
@@ -1581,12 +1638,12 @@ document.addEventListener("click", async e=>{
     if (!title) return toast("Enter a title");
     if (!/^https?:\/\/\S+$/i.test(url)) return toast("Enter a full video link starting with https://");
     const prev = S.tuts.slice(); S.tuts.push({ id:"t_"+Date.now().toString(36), title, sub, url });
-    try { await saveTuts(); render(); toast("Video added"); } catch(e) { S.tuts = prev; render(); toast("Failed: "+(e.code||e.message)); }
+    try { await saveTuts(); logAct("settings","Added tutorial video: "+title, "Tutorials"); render(); toast("Video added"); } catch(e) { S.tuts = prev; render(); toast("Failed: "+(e.code||e.message)); }
   }
   else if ("deltut" in d) {
     if (!confirm("Delete this tutorial video?")) return;
     const prev = S.tuts.slice(); S.tuts = S.tuts.filter(t=>t.id!==d.deltut);
-    try { await saveTuts(); render(); toast("Deleted"); } catch(e) { S.tuts = prev; render(); toast("Failed: "+(e.code||e.message)); }
+    try { await saveTuts(); logAct("settings","Deleted a tutorial video", "Tutorials"); render(); toast("Deleted"); } catch(e) { S.tuts = prev; render(); toast("Failed: "+(e.code||e.message)); }
   }
   else if ("uptut" in d) {
     const i = S.tuts.findIndex(t=>t.id===d.uptut); if (i < 1) return;
@@ -1596,31 +1653,32 @@ document.addEventListener("click", async e=>{
   else if ("delreason" in d) {
     if (!confirm("Delete this reason? Old history keeps its text.")) return;
     const prev = S.reasons.slice(); S.reasons = S.reasons.filter(r=>r.id!==d.delreason);
-    try { await saveReasons(); render(); toast("Deleted"); } catch(e) { S.reasons = prev; render(); toast("Failed: "+(e.code||e.message)); }
+    try { await saveReasons(); logAct("settings","Deleted a balance reason", "Reasons"); render(); toast("Deleted"); } catch(e) { S.reasons = prev; render(); toast("Failed: "+(e.code||e.message)); }
   }
   else if ("addw" in d) {
     const k = $("#wt").value, n = $("#wn").value.trim(), label = $("#wlb").value.trim();
     if (!/^01\d{9}$/.test(n)) return toast("Number must be 11 digits starting with 01");
     if (S.wl[k].some(w=>w.n===n)) return toast("This number is already saved");
-    S.wl[k].push({ n, label }); await saveW(); render(); toast("Number saved");
+    S.wl[k].push({ n, label }); await saveW(); logAct("settings","Saved "+k+" number "+n, "Wallet numbers"); render(); toast("Number saved");
   }
   else if ("delw" in d) {
     const [k,i] = d.delw.split(":"); if (!confirm("Delete this saved number? Existing orders keep their number.")) return;
-    S.wl[k].splice(+i,1); await saveW(); render(); toast("Deleted");
+    const wnum = (S.wl[k][+i]||{}).n; S.wl[k].splice(+i,1); await saveW(); logAct("settings","Deleted "+k+" number "+(wnum||""), "Wallet numbers"); render(); toast("Deleted");
   }
   else if ("savelang" in d) {
     const enabled = [["en","#lg_en"],["bn","#lg_bn"]].filter(([k,id])=>$(id).checked).map(x=>x[0]), def = $("#lg_def").value;
     if (!enabled.length) return toast("Turn on at least one language");
     if (!enabled.includes(def)) return toast("The default language must be one of the available languages");
-    try { if (!DEMO) await fb.setDoc(fb.doc(db,"settings","language"), { default:def, enabled }); S.langCfg = { default:def, enabled }; render(); toast("Language saved"); } catch(e) { toast("Failed: "+(e.code||e.message)); }
+    try { if (!DEMO) await fb.setDoc(fb.doc(db,"settings","language"), { default:def, enabled }); S.langCfg = { default:def, enabled }; logAct("settings","Language saved (default "+def+")", "Language"); render(); toast("Language saved"); } catch(e) { toast("Failed: "+(e.code||e.message)); }
   }
   else if ("savebonus" in d) {
     const v = Math.max(0, Math.round((Number($("#sb_v").value)||0)*100)/100);
-    try { if (!DEMO) await fb.setDoc(fb.doc(db,"settings","signupBonus"), { amount:v }); S.bonus = v; render(); toast(v ? "Sign up bonus saved: "+fmt(v)+" BDT" : "Sign up bonus turned off"); } catch(e) { toast("Failed: "+(e.code||e.message)); }
+    try { if (!DEMO) await fb.setDoc(fb.doc(db,"settings","signupBonus"), { amount:v }); S.bonus = v; logAct("settings","Sign up bonus "+(v ? "set to "+fmt(v)+" BDT" : "turned off"), "Sign up bonus"); render(); toast(v ? "Sign up bonus saved: "+fmt(v)+" BDT" : "Sign up bonus turned off"); } catch(e) { toast("Failed: "+(e.code||e.message)); }
   }
   else if ("saverates" in d) {
     const r = { usdt:Number($("#ru").value), bonus:Number($("#rb").value) };
     if (DEMO) S.rates=r; else await fb.setDoc(fb.doc(db,"settings","rates"),r);
+    logAct("settings","Rates saved (USDT "+r.usdt+", bonus "+r.bonus+"%)", "Rates");
     toast("Rates saved");
   }
   else if ("logout" in d) { unsubs.forEach(u=>u()); unsubs=[]; if(!DEMO) await fb.signOut(auth); S.admin=false; S.me=null; S.admins=[]; render(); }
