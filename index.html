@@ -139,7 +139,7 @@ S.sup = [];
 S.rcodes = [];
 S.transfers = [];
 S.tf = { fq:"", tq:"", a:"", n:"" };
-S.ttab = "new"; S.tfs = ""; S.tfd = "0"; S.transferLimit = 0; S.bonus = 0;
+S.ipq = ""; S.ttab = "new"; S.tfs = ""; S.tfd = "0"; S.transferLimit = 0; S.bonus = 0;
 S.rc = { amount:"", code:"", target:"all", ref:"", max:"" };
 /* Refer program: level i = the i-th person above the user who finished the task (A = direct referrer, B = referrer of A ...) */
 S.refCfg = null;
@@ -232,6 +232,32 @@ function users(){
   <label style="display:flex;align-items:center;gap:8px;font-size:14px;margin-bottom:12px"><input type="checkbox" style="width:auto" ${S.showDel?"checked":""} onchange="window.toggleDel(this.checked)"> Show deleted accounts</label>
   <table><thead><tr><th>Phone</th><th>Code</th><th>Referred by</th><th>Last IP</th><th>Balance</th><th>Income</th><th>Online</th><th>Status</th><th></th></tr></thead><tbody id="ub">${userRows(visU())}</tbody></table></div>`;
 }
+/* ---------- IP scanner: accounts that share the same IP ---------- */
+function ipBody(){
+  const q = String(S.ipq||"").trim().toLowerCase();
+  const live = S.users.filter(u => uStatus(u) !== "deleted"), withIp = live.filter(u => u.lastIp), noIp = live.length - withIp.length;
+  const g = {}; withIp.forEach(u => (g[u.lastIp] || (g[u.lastIp] = [])).push(u));
+  let ips = Object.keys(g);
+  const dupIps = ips.filter(ip => g[ip].length > 1);
+  ips = (q ? ips.filter(ip => ip.toLowerCase().includes(q)) : dupIps).sort((a,b) => g[b].length - g[a].length || a.localeCompare(b));
+  const dupAcc = dupIps.reduce((a,ip) => a + g[ip].length, 0);
+  let head;
+  if (q) head = !ips.length ? `<span style="color:var(--red)">No account found with IP "${esc(S.ipq.trim())}".</span>`
+    : (() => { const dd = ips.filter(ip => g[ip].length > 1); return dd.length ? `<b style="color:var(--red)">Duplicate found:</b> ${dd.length} IP${dd.length>1?"s":""} with more than one account (${dd.reduce((a,ip)=>a+g[ip].length,0)} accounts).` : `<b style="color:#0b7a55">No duplicate.</b> Only one account uses ${ips.length>1 ? "each of these IPs" : "this IP"}.`; })();
+  else head = dupIps.length ? `<b style="color:var(--red)">${dupIps.length}</b> IP${dupIps.length>1?"s":""} used by more than one account · <b>${dupAcc}</b> accounts in total` : `<span style="color:#0b7a55"><b>No duplicate IP found.</b> Every IP has only one account.</span>`;
+  const grp = ip => { const l = g[ip].slice().sort((a,b) => tms(b.createdAt) - tms(a.createdAt)), n = l.length;
+    const tag = n > 1 ? `<span class="tag x">Duplicate IP × ${n}</span>` : `<span class="tag">Single account</span>`;
+    const rows = l.map(u => `<tr><td>${cp(uName(u))}</td><td>${cp(u.code)}</td><td>${fmt(u.balance)}</td><td>${presCell(u)}</td><td>${esc(ip)} ${tag}</td><td>${uStatus(u)==="active" ? "" : `<span class="tag ${ACC_TC[uStatus(u)]||""}">${ACC[uStatus(u)]}</span>`}</td></tr>`).join("");
+    return `<div style="margin-top:14px"><div style="font-size:14px;margin-bottom:6px"><b>${esc(ip)}</b> · ${n} account${n>1?"s":""} ${tag}</div><table><thead><tr><th>Number</th><th>Refer code</th><th>Balance</th><th>Online</th><th>IP</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`; };
+  return `<p style="font-size:14px;line-height:1.5">${head}</p>` + ips.map(grp).join("")
+    + (noIp ? `<p style="font-size:12px;color:var(--mute);margin-top:14px">${noIp} account${noIp>1?"s have":" has"} no IP saved yet (saved when the user logs in).</p>` : "");
+}
+function ipScan(){
+  return `<h1>IP scanner</h1><div class="box"><input id="ip_q" placeholder="Search an IP, e.g. 103.25.10.4" autocomplete="off" value="${esc(S.ipq)}" style="max-width:340px;margin-bottom:10px" oninput="window.ipSearch(this.value)">
+  <p style="font-size:12px;color:var(--mute);margin-bottom:6px">Shows accounts that use the same IP. Leave the box empty to see all duplicate IPs. Type an IP to see every account on it.</p><div id="ip_body">${ipBody()}</div></div>`;
+}
+window.ipSearch = v => { S.ipq = v; const b = $("#ip_body"); if (b) b.innerHTML = ipBody(); };
+
 const userRows = list => list.length ? list.map(u=>{ const refCode = u.referredBy ? (S.users.find(x=>x.id===u.referredBy)?.code || u.referredBy.slice(0,6)+"...") : "-"; return `<tr><td>${cp(uName(u))}</td><td>${cp(u.code)}</td><td>${esc(refCode)}</td><td>${esc(u.lastIp||"-")}</td><td>${fmt(u.balance)}</td><td>${fmt(u.income)}</td><td>${presCell(u)}</td><td><span class="tag ${ACC_TC[uStatus(u)]||""}">${ACC[uStatus(u)]}</span></td><td style="white-space:nowrap"><button class="sm out" data-edit="${u.id}">Edit</button> <button class="sm" data-bal="${u.id}">Balance</button> <button class="sm out" data-acct="${u.id}">Account</button> <button class="sm out" data-uhist="${u.id}">History</button></td></tr>`; }).join("") : `<tr><td colspan="9" style="color:var(--mute)">No users found.</td></tr>`;
 const visU = () => S.users.filter(u => S.showDel || uStatus(u) !== "deleted");
 window.toggleDel = v => { S.showDel = v; render(); };
@@ -870,11 +896,11 @@ window.addEventListener("popstate", e => {
   navLast = JSON.stringify(navSnap());
 });
 function render(){
-  const r = $("#root"), ae = document.activeElement, keepId = ae && (/^(nu_q|oq|sq|sf_a|sf_n|sf_q|rc_a|rc_c|rc_r|rc_m|tf_f|tf_t|tf_a|tf_n|tf_s|tl_v)$/.test(ae.id)) ? ae.id : null, keepOq = keepId ? ae.selectionStart : null;
+  const r = $("#root"), ae = document.activeElement, keepId = ae && (/^(nu_q|ip_q|oq|sq|sf_a|sf_n|sf_q|rc_a|rc_c|rc_r|rc_m|tf_f|tf_t|tf_a|tf_n|tf_s|tl_v)$/.test(ae.id)) ? ae.id : null, keepOq = keepId ? ae.selectionStart : null;
   if (!S.admin) { r.innerHTML = login(); return; }
   if (S.tab === "refer" && ae && ((ae.dataset && ae.dataset.rf === "pct") || ae.id === "rf_need" || ae.id === "rf_bonus")) return;   /* do not wipe a % being typed */
   const n=(k,l)=>`<button class="${S.tab===k?"act":""}" data-tab="${k}">${l}</button>`;
-  r.innerHTML = `<div class="wrap"><aside><h2>Nova Pay Admin</h2>${n("dash","Dashboard")}${n("users","Users")}${n("newu","New users")}${n("orders","Buy orders")}${n("sells","Sell orders")}${n("refer","Refer program")}${n("redeem","Redeem codes")}${n("transfer","Transfer")}${n("settings","Settings")}<button data-logout style="margin-top:18px;background:rgba(255,255,255,.18);color:#fff">Log out</button></aside><main>${navIdx>0 ? `<button class="sm out" data-goback style="margin-bottom:10px">‹ Back</button>` : ""}${({dash,users,newu:newUsers,orders,sells,refer,redeem,transfer,settings})[S.tab]()}</main></div>`;
+  r.innerHTML = `<div class="wrap"><aside><h2>Nova Pay Admin</h2>${n("dash","Dashboard")}${n("users","Users")}${n("ipscan","IP scanner")}${n("newu","New users")}${n("orders","Buy orders")}${n("sells","Sell orders")}${n("refer","Refer program")}${n("redeem","Redeem codes")}${n("transfer","Transfer")}${n("settings","Settings")}<button data-logout style="margin-top:18px;background:rgba(255,255,255,.18);color:#fff">Log out</button></aside><main>${navIdx>0 ? `<button class="sm out" data-goback style="margin-bottom:10px">‹ Back</button>` : ""}${({dash,users,ipscan:ipScan,newu:newUsers,orders,sells,refer,redeem,transfer,settings})[S.tab]()}</main></div>`;
   navSync();
   if (keepOq !== null) { const el = $("#"+keepId); if (el) { el.focus(); try { el.setSelectionRange(keepOq,keepOq); } catch {} } }
 }
