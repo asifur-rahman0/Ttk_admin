@@ -39,7 +39,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}
 th,td{text-align:left;padding:9px 9px;border-bottom:1px solid var(--line);white-space:nowrap}
 th{color:var(--mute);font-weight:700;font-size:12px;background:var(--mint)}th:first-child{border-radius:9px 0 0 9px}th:last-child{border-radius:0 9px 9px 0}
 tbody tr:hover td{background:#f5fbff}
-.tag{padding:3px 10px;border-radius:12px;font-size:11.5px;font-weight:700;background:#e2f6ec;color:#0b7a55}.tag.x{background:#fde8e6;color:var(--red)}.tag.cr{background:#fff3d6;color:#8a5a00}.tag.lk{background:#ece6f7;color:#5a3d99}.tag.fz{background:#dcefff;color:#0b5394}.tag.off{background:#eef0f3;color:var(--mute);font-weight:600}.dot{width:12px;height:12px;border-radius:50%;background:#1fbf75;box-shadow:0 0 0 0 rgba(31,191,117,.6);animation:pls 1.8s infinite;display:inline-block}@keyframes pls{70%{box-shadow:0 0 0 9px rgba(31,191,117,0)}100%{box-shadow:0 0 0 0 rgba(31,191,117,0)}}.onl{display:flex;align-items:center;gap:22px;flex-wrap:wrap}.onl .it small{display:block;color:var(--mute);font-size:12px;font-weight:600}.onl .it b{font-family:var(--display);font-size:20px;color:var(--gd)}
+.tag{padding:3px 10px;border-radius:12px;font-size:11.5px;font-weight:700;background:#e2f6ec;color:#0b7a55}.tag.x{background:#fde8e6;color:var(--red)}.tag.cr{background:#fff3d6;color:#8a5a00}.tag.lk{background:#ece6f7;color:#5a3d99}.tag.fz{background:#dcefff;color:#0b5394}aside button.lckd{opacity:.55}aside .who{font-size:11px;color:#bfe4ff;margin:-2px 4px 10px;word-break:break-all}.tag.off{background:#eef0f3;color:var(--mute);font-weight:600}.dot{width:12px;height:12px;border-radius:50%;background:#1fbf75;box-shadow:0 0 0 0 rgba(31,191,117,.6);animation:pls 1.8s infinite;display:inline-block}@keyframes pls{70%{box-shadow:0 0 0 9px rgba(31,191,117,0)}100%{box-shadow:0 0 0 0 rgba(31,191,117,0)}}.onl{display:flex;align-items:center;gap:22px;flex-wrap:wrap}.onl .it small{display:block;color:var(--mute);font-size:12px;font-weight:600}.onl .it b{font-family:var(--display);font-size:20px;color:var(--gd)}
 .form{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px;align-items:end}
 .login{max-width:340px;margin:12vh auto;background:#fff;padding:24px 20px;border-radius:24px;border:1px solid var(--line);box-shadow:0 26px 50px -26px rgba(15,111,208,.55)}
 .login h1{font-size:26px;color:var(--g)}
@@ -79,7 +79,7 @@ let fb = {}, auth, db;
 if (!DEMO) try {
   const V = "https://www.gstatic.com/firebasejs/10.12.2/";
   const [a, f, ap] = await Promise.all([import(V+"firebase-auth.js"), import(V+"firebase-firestore.js"), import(V+"firebase-app.js")]);
-  fb = { ...a, ...f };
+  fb = { ...a, ...f, initializeApp: ap.initializeApp, deleteApp: ap.deleteApp };
   const app = ap.initializeApp(firebaseConfig, "nerivo-admin");   /* separate app name = separate login session from the user panel */
   auth = a.initializeAuth(app, { persistence: [a.indexedDBLocalPersistence, a.browserLocalPersistence, a.inMemoryPersistence] }); db = f.initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
 } catch(e) { showErr("Firebase could not load: "+e.message+" (check internet or VPN)"); throw e; }
@@ -109,6 +109,18 @@ async function saveW(){
 loadW();
 window.pickNum = (id,v) => { if (v) { const el = $("#"+id); if (el) el.value = v; } };
 const fdt = ms => ms ? new Date(ms).toLocaleString() : "-";
+/* ---------- Admin roles & permissions ---------- */
+const ADM_TABS = [["dash","Dashboard"],["users","Users"],["ipscan","IP scanner"],["newu","New users"],["orders","Buy orders"],["sells","Sell orders"],["refer","Refer program"],["redeem","Redeem codes"],["transfer","Transfer"],["settings","Settings"]];
+const ADM_ROLE = { owner:"Owner", admin:"Admin", subadmin:"Sub admin", viewer:"Viewer" };
+const ADM_PRESET = { admin:ADM_TABS.map(x=>x[0]), subadmin:["users","newu","ipscan","orders","sells"], viewer:ADM_TABS.map(x=>x[0]) };
+const VIEW_OK = ["login","logout","goback","tab","cp","ttab","tfhist","uhist","hist","shist","ofilter","sofilter","rccopy","scopy"];   /* buttons a Viewer may press */
+/* Accounts created by hand in Firebase (no "managed" mark) are always OWNER, whatever other fields they have. Only accounts made in Admin Manage are limited. */
+const admManaged = d => d.managed === true || "createdBy" in d;
+const admRole = d => admManaged(d) ? (d.role || "viewer") : "owner";
+const isOwner = () => !S.me || S.me.role === "owner";
+const isViewer = () => !!S.me && S.me.role === "viewer";
+const can = t => isOwner() || (t !== "adminmgr" && Array.isArray(S.me.perms) && S.me.perms.includes(t));
+const firstAllowed = () => { const x = ADM_TABS.find(t => can(t[0])); return x ? x[0] : "dash"; };
 /* ---------- Online / last seen (user app writes lastSeenAt about every 60 seconds while open) ---------- */
 const ONLINE_MS = 150000;   /* online = seen in the last 2.5 minutes */
 const seenMs = u => tms(u.lastSeenAt);
@@ -139,7 +151,7 @@ S.sup = [];
 S.rcodes = [];
 S.transfers = [];
 S.tf = { fq:"", tq:"", a:"", n:"" };
-S.ipq = ""; S.ttab = "new"; S.tfs = ""; S.tfd = "0"; S.transferLimit = 0; S.bonus = 0;
+S.ipq = ""; S.me = null; S.admins = []; S.am = { e:"", p:"", r:"admin", perms:ADM_PRESET.admin.slice() }; S.ttab = "new"; S.tfs = ""; S.tfd = "0"; S.transferLimit = 0; S.bonus = 0;
 S.rc = { amount:"", code:"", target:"all", ref:"", max:"" };
 /* Refer program: level i = the i-th person above the user who finished the task (A = direct referrer, B = referrer of A ...) */
 S.refCfg = null;
@@ -867,6 +879,68 @@ window.bkGoRestore = async btn => {
   BK_PENDING = null;
 };
 
+/* ---------- Admin Manage (owner only) ---------- */
+async function kickOut(msg){ unsubs.forEach(u=>u()); unsubs = []; try { await fb.signOut(auth); } catch {} S.admin = false; S.me = null; S.err = msg; render(); }
+function lockedView(){ return `<h1>🔒 Locked</h1><div class="box"><p style="font-size:15px;line-height:1.6">You do not have permission to open this section.<br>Ask the owner to give you access.</p></div>`; }
+const amBoxes = (cls, sel) => ADM_TABS.map(([k,l]) => `<label style="display:flex;align-items:center;gap:8px;font-size:14px;margin:5px 0;font-weight:500"><input type="checkbox" class="${cls}" value="${k}" ${sel.includes(k)?"checked":""} style="width:auto" ${cls==="am_c" ? 'onchange="window.amPerm(this)"' : ""}> ${l}</label>`).join("");
+const amRoleOpts = cur => ["admin","subadmin","viewer"].map(r => `<option value="${r}" ${cur===r?"selected":""}>${ADM_ROLE[r]}</option>`).join("");
+const amAccess = a => admRole(a) === "owner" ? "All sections" : ((a.perms||[]).map(k => (ADM_TABS.find(x=>x[0]===k)||[k,k])[1]).join(", ") || "-");
+function adminMgr(){
+  const f = S.am, me = adminEmail();
+  const list = S.admins.slice().sort((a,b) => ((admRole(a)!=="owner")?1:0) - ((admRole(b)!=="owner")?1:0) || tms(a.createdAt) - tms(b.createdAt));
+  const rows = list.map(a => { const role = admRole(a), own = role === "owner", off = a.active === false;
+    return `<tr><td>${esc(a.email||a.id.slice(0,8))}${a.email===me ? ' <span style="color:var(--mute)">(you)</span>' : ""}</td><td><span class="tag ${own?"":"fz"}">${esc(ADM_ROLE[role]||role)}</span></td><td style="white-space:normal;max-width:340px;font-size:12px">${esc(amAccess(a))}</td><td><span class="tag ${off?"x":""}">${off?"Disabled":"Active"}</span></td><td style="white-space:nowrap">${own ? "" : `<button class="sm out" data-amedit="${esc(a.id)}">Edit</button> <button class="sm out" data-amtoggle="${esc(a.id)}">${off?"Enable":"Disable"}</button> <button class="sm red" data-amdel="${esc(a.id)}">Delete</button>`}</td></tr>`; }).join("");
+  return `<h1>Admin Manage</h1>
+  <div class="box"><h3 style="margin-bottom:6px">Create admin account</h3><p style="font-size:13px;color:var(--mute);line-height:1.5">The first admin account is the <b>Owner</b>. Accounts you create here are Admin, Sub admin or Viewer. They can open only the sections you tick. Other sections stay visible with a 🔒 and cannot be opened. A <b>Viewer</b> can look at the ticked sections but cannot change anything.</p>
+  <div class="form" style="margin-top:8px"><div><label>Email</label><input id="am_e" type="email" autocomplete="off" placeholder="name@example.com" value="${esc(f.e)}" oninput="window.amField('e',this.value)"></div><div><label>Password (min 6)</label><input id="am_p" type="text" autocomplete="off" placeholder="Set a password" value="${esc(f.p)}" oninput="window.amField('p',this.value)"></div><div><label>Role</label><select onchange="window.amRole(this.value)">${amRoleOpts(f.r)}</select></div></div>
+  <label style="margin-top:12px">Sections this account can open</label><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:0 14px">${amBoxes("am_c", f.perms)}</div>
+  <button style="margin-top:14px" data-amcreate>Create account</button></div>
+  <div class="box"><h3 style="margin-bottom:6px">Admin accounts</h3><table><thead><tr><th>Email</th><th>Role</th><th>Access</th><th>Status</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="5" style="color:var(--mute)">No accounts loaded.</td></tr>`}</tbody></table></div>`;
+}
+window.amField = (k,v) => { S.am[k] = v; };
+window.amRole = v => { S.am.r = v; S.am.perms = (ADM_PRESET[v]||[]).slice(); render(); };
+window.amPerm = el => { if (el.checked) { if (!S.am.perms.includes(el.value)) S.am.perms.push(el.value); } else S.am.perms = S.am.perms.filter(x => x !== el.value); };
+async function createAdmin(){
+  const f = S.am, email = String(f.e||"").trim().toLowerCase(), pw = String(f.p||"");
+  if (!/^\S+@\S+\.\S+$/.test(email)) return toast("Enter a valid email");
+  if (pw.length < 6) return toast("Password must be at least 6 characters");
+  if (!["admin","subadmin","viewer"].includes(f.r)) return toast("Choose a role");
+  if (!f.perms.length) return toast("Tick at least one section");
+  if (DEMO) { S.admins.push({ id:"d"+Date.now(), email, role:f.r, perms:f.perms.slice(), active:true, createdAt:Date.now() }); S.am = { e:"", p:"", r:"admin", perms:ADM_PRESET.admin.slice() }; render(); return toast("Created (demo)"); }
+  let app2 = null, uid = null;
+  try {
+    app2 = fb.initializeApp(firebaseConfig, "creator-" + Date.now());   /* separate session so the owner stays logged in */
+    const a2 = fb.initializeAuth(app2, { persistence:[fb.inMemoryPersistence] });
+    const c = await fb.createUserWithEmailAndPassword(a2, email, pw); uid = c.user.uid;
+    await fb.setDoc(fb.doc(db,"admins",uid), { email, role:f.r, perms:f.perms.slice(), active:true, managed:true, createdAt:fb.serverTimestamp(), createdBy:adminEmail() });
+    try { await fb.signOut(a2); } catch {}
+    S.am = { e:"", p:"", r:"admin", perms:ADM_PRESET.admin.slice() }; render(); toast("Account created: "+email);
+  } catch (e) {
+    console.error(e);
+    toast(e.code === "auth/email-already-in-use" ? "This email already has an account. Use another email." : e.code === "auth/weak-password" ? "Password is too weak" : uid ? "Login was created but the admin profile could not be saved. Publish the latest Firestore rules and try again with another email." : (e.code || e.message));
+  } finally { if (app2) try { await fb.deleteApp(app2); } catch {} }
+}
+function amEdit(id){
+  const a = S.admins.find(x => x.id === id); if (!a || admRole(a) === "owner") return;
+  const m = modal(`<h2>Edit access</h2><p style="font-size:14px;margin:8px 0">${esc(a.email||id)}</p><label>Role</label><select id="am_er" onchange="window.amEditRole(this)">${amRoleOpts(a.role)}</select><label style="margin-top:12px">Sections this account can open</label><div>${amBoxes("am_mc", a.perms||[])}</div><div style="display:flex;gap:8px;margin-top:14px"><button class="sm" onclick="window.amSave('${esc(id)}',this)">Save</button><button class="sm out" onclick="this.closest('.modal').remove()">Cancel</button></div>`);
+}
+window.amEditRole = sel => { const p = ADM_PRESET[sel.value] || []; sel.closest(".modal").querySelectorAll(".am_mc").forEach(c => { c.checked = p.includes(c.value); }); };
+window.amSave = async (id, btn) => {
+  const m = btn.closest(".modal"), role = m.querySelector("#am_er").value, perms = [...m.querySelectorAll(".am_mc")].filter(c => c.checked).map(c => c.value);
+  if (!perms.length) return toast("Tick at least one section");
+  try { if (DEMO) { const a = S.admins.find(x=>x.id===id); if (a) { a.role = role; a.perms = perms; } } else await fb.updateDoc(fb.doc(db,"admins",id), { role, perms }); m.remove(); render(); toast("Saved"); } catch (e) { toast("Failed: "+(e.code||e.message)); }
+};
+async function amToggle(id){
+  const a = S.admins.find(x => x.id === id); if (!a) return; const nx = a.active === false;
+  if (!confirm((nx ? "Enable " : "Disable ")+(a.email||id)+"?")) return;
+  try { if (DEMO) a.active = nx; else await fb.updateDoc(fb.doc(db,"admins",id), { active:nx }); render(); toast(nx ? "Enabled" : "Disabled"); } catch (e) { toast("Failed: "+(e.code||e.message)); }
+}
+async function amDelete(id){
+  const a = S.admins.find(x => x.id === id); if (!a) return;
+  if (!confirm("Delete admin "+(a.email||id)+"? They will not be able to open this panel any more.")) return;
+  try { if (DEMO) S.admins = S.admins.filter(x => x.id !== id); else await fb.deleteDoc(fb.doc(db,"admins",id)); render(); toast("Deleted"); } catch (e) { toast("Failed: "+(e.code||e.message)); }
+}
+
 const navSnap = () => ({ t:S.tab, tt:S.tab==="transfer" ? S.ttab : null });
 function navApply(nv){ S.tab = nv.t; if (nv.tt) S.ttab = nv.tt; render(); }
 /* ---- back support: phone back button / browser back / on-screen back ---- */
@@ -896,11 +970,11 @@ window.addEventListener("popstate", e => {
   navLast = JSON.stringify(navSnap());
 });
 function render(){
-  const r = $("#root"), ae = document.activeElement, keepId = ae && (/^(nu_q|ip_q|oq|sq|sf_a|sf_n|sf_q|rc_a|rc_c|rc_r|rc_m|tf_f|tf_t|tf_a|tf_n|tf_s|tl_v)$/.test(ae.id)) ? ae.id : null, keepOq = keepId ? ae.selectionStart : null;
+  const r = $("#root"), ae = document.activeElement, keepId = ae && (/^(nu_q|ip_q|am_e|am_p|oq|sq|sf_a|sf_n|sf_q|rc_a|rc_c|rc_r|rc_m|tf_f|tf_t|tf_a|tf_n|tf_s|tl_v)$/.test(ae.id)) ? ae.id : null, keepOq = keepId ? ae.selectionStart : null;
   if (!S.admin) { r.innerHTML = login(); return; }
   if (S.tab === "refer" && ae && ((ae.dataset && ae.dataset.rf === "pct") || ae.id === "rf_need" || ae.id === "rf_bonus")) return;   /* do not wipe a % being typed */
-  const n=(k,l)=>`<button class="${S.tab===k?"act":""}" data-tab="${k}">${l}</button>`;
-  r.innerHTML = `<div class="wrap"><aside><h2>Nova Pay Admin</h2>${n("dash","Dashboard")}${n("users","Users")}${n("ipscan","IP scanner")}${n("newu","New users")}${n("orders","Buy orders")}${n("sells","Sell orders")}${n("refer","Refer program")}${n("redeem","Redeem codes")}${n("transfer","Transfer")}${n("settings","Settings")}<button data-logout style="margin-top:18px;background:rgba(255,255,255,.18);color:#fff">Log out</button></aside><main>${navIdx>0 ? `<button class="sm out" data-goback style="margin-bottom:10px">‹ Back</button>` : ""}${({dash,users,ipscan:ipScan,newu:newUsers,orders,sells,refer,redeem,transfer,settings})[S.tab]()}</main></div>`;
+  const n=(k,l)=>`<button class="${S.tab===k?"act":""}${can(k)?"":" lckd"}" data-tab="${k}">${l}${can(k)?"":" 🔒"}</button>`;
+  r.innerHTML = `<div class="wrap"><aside><h2>Nova Pay Admin</h2><div class="who">${esc(adminEmail())} · ${esc(ADM_ROLE[(S.me&&S.me.role)||"owner"]||"")}</div>${n("dash","Dashboard")}${n("users","Users")}${n("ipscan","IP scanner")}${n("newu","New users")}${n("orders","Buy orders")}${n("sells","Sell orders")}${n("refer","Refer program")}${n("redeem","Redeem codes")}${n("transfer","Transfer")}${n("settings","Settings")}${n("adminmgr","Admin Manage")}<button data-logout style="margin-top:18px;background:rgba(255,255,255,.18);color:#fff">Log out</button></aside><main>${navIdx>0 ? `<button class="sm out" data-goback style="margin-bottom:10px">‹ Back</button>` : ""}${can(S.tab) ? ({dash,users,ipscan:ipScan,newu:newUsers,orders,sells,refer,redeem,transfer,settings,adminmgr:adminMgr})[S.tab]() : lockedView()}</main></div>`;
   navSync();
   if (keepOq !== null) { const el = $("#"+keepId); if (el) { el.focus(); try { el.setSelectionRange(keepOq,keepOq); } catch {} } }
 }
@@ -931,6 +1005,13 @@ function subscribe(){
     onSnapshot(doc(db,"settings","wallets"), s=>{ if(s.exists()){ const d=s.data(); S.wl={bkash:d.bkash||[],nagad:d.nagad||[]}; } if(S.tab!=="orders") render(); }, ()=>{}),
     onSnapshot(doc(db,"settings","rates"), s=>{ if(s.exists()) S.rates=s.data(); if(S.tab!=="settings") render(); }, err("settings/rates"))
   ];
+  { const myUid = auth && auth.currentUser && auth.currentUser.uid;
+    if (myUid) unsubs.push(onSnapshot(doc(db,"admins",myUid), s=>{
+      if (!s.exists() || s.data().active === false) { kickOut("Your admin access was removed or disabled."); return; }
+      const d = s.data(), nm = { role:admRole(d), perms:d.perms || [] };
+      if (JSON.stringify(nm) !== JSON.stringify(S.me)) { S.me = nm; if (!can(S.tab)) S.tab = firstAllowed(); render(); }
+    }, ()=>{}));
+    if (isOwner()) unsubs.push(onSnapshot(collection(db,"admins"), s=>{ S.admins = s.docs.map(d=>({id:d.id,...d.data()})); if (S.tab === "adminmgr") render(); }, ()=>{})); }
   { const iv = setInterval(refreshPresence, 20000); unsubs.push(()=>clearInterval(iv)); }   /* online -> last seen without a page refresh */
 }
 
@@ -941,6 +1022,9 @@ async function doLogin(){
     const c = await fb.signInWithEmailAndPassword(auth,email,pw);
     const a = await fb.getDoc(fb.doc(db,"admins",c.user.uid));
     if (!a.exists()) { await fb.signOut(auth); S.err="This account is not an admin."; render(); return; }
+    const dd = a.data() || {};
+    if (dd.active === false) { await fb.signOut(auth); S.err="This admin account is disabled."; render(); return; }
+    S.me = { role: admRole(dd), perms: dd.perms || [] }; S.tab = can(S.tab) ? S.tab : firstAllowed();
     S.admin=true; subscribe(); render();
   } catch(e) { S.err = e.code==="auth/invalid-credential" ? "Wrong email or password." : e.message; render(); }
 }
@@ -1405,8 +1489,10 @@ async function saveReasons(){ if (!DEMO) await fb.setDoc(fb.doc(db,"settings","r
 
 document.addEventListener("click", async e=>{
   const t = e.target.closest("button"); if(!t) return; const d = t.dataset;
+  if (isViewer() && !VIEW_OK.some(k => k in d)) return toast("🔒 View only account. You cannot change anything.");
+  if (("wipe" in d || "bkrs" in d || "amcreate" in d || "amedit" in d || "amtoggle" in d || "amdel" in d) && !isOwner()) return toast("🔒 Only the owner can do this.");
   if ("goback" in d) { if (navIdx > 0) history.back(); }
-  else if ("tab" in d) { S.tab=d.tab; render(); }
+  else if ("tab" in d) { if (!can(d.tab)) return toast("🔒 You do not have permission for this section. Ask the owner."); S.tab=d.tab; render(); }
   else if ("cp" in d) copyOrShow(d.cp, "Copied: "+d.cp);
   else if ("login" in d) doLogin();
   else if ("edit" in d) editUser(d.edit);
@@ -1458,6 +1544,10 @@ document.addEventListener("click", async e=>{
   else if ("bkdl" in d) bkBackupClick();
   else if ("bkrs" in d) { if (DEMO) return toast("Not available in demo mode"); $("#bk_file").click(); }
   else if ("wipe" in d) bkWipeModal();
+  else if ("amcreate" in d) createAdmin();
+  else if ("amedit" in d) amEdit(d.amedit);
+  else if ("amtoggle" in d) amToggle(d.amtoggle);
+  else if ("amdel" in d) amDelete(d.amdel);
   else if ("addrc" in d) createRC();
   else if ("rccopy" in d) copyOrShow(d.rccopy, "Copied: "+d.rccopy);
   else if ("rctoggle" in d) {
@@ -1533,7 +1623,7 @@ document.addEventListener("click", async e=>{
     if (DEMO) S.rates=r; else await fb.setDoc(fb.doc(db,"settings","rates"),r);
     toast("Rates saved");
   }
-  else if ("logout" in d) { unsubs.forEach(u=>u()); unsubs=[]; if(!DEMO) await fb.signOut(auth); S.admin=false; render(); }
+  else if ("logout" in d) { unsubs.forEach(u=>u()); unsubs=[]; if(!DEMO) await fb.signOut(auth); S.admin=false; S.me=null; S.admins=[]; render(); }
 });
 
 document.addEventListener("change", e => { const el = e.target; if (el && el.dataset && el.dataset.rf === "on") { const sp = el.parentElement.querySelector("span"); if (sp) sp.textContent = el.checked ? "On" : "Off"; } });
