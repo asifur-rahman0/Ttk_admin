@@ -87,7 +87,7 @@ if (!DEMO) try {
 const $ = s => document.querySelector(s);
 const fmt = n => Number(n || 0).toFixed(2);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const S = { admin:false, tab:"dash", users:[], orders:[], rates:{usdt:130.34,bonus:3}, err:"", of:"all", oq:"", wl:{bkash:[],nagad:[]}, sells:[], sf:"all", sq:"", sellForm:{u:"",a:"",m:"bkash",n:"",q:""}, swl:null, nu:{p:"today",q:"",lv:0,st:"active"} };
+const S = { usdtOrders:[], usdtCfg:null, uf:"all", uq:"", admin:false, tab:"dash", users:[], orders:[], rates:{usdt:130.34,bonus:3}, err:"", of:"all", oq:"", wl:{bkash:[],nagad:[]}, sells:[], sf:"all", sq:"", sellForm:{u:"",a:"",m:"bkash",n:"",q:""}, swl:null, nu:{p:"today",q:"",lv:0,st:"active"} };
 let unsubs = [];
 /* Order status: open -> created (user claimed + picked wallet) -> success / failed / lock (admin decides). Old names are mapped. */
 const NS = s => ({reserved:"created",done:"success",claimed:"success",rejected:"failed"})[s] || s;
@@ -110,7 +110,7 @@ loadW();
 window.pickNum = (id,v) => { if (v) { const el = $("#"+id); if (el) el.value = v; } };
 const fdt = ms => ms ? new Date(ms).toLocaleString() : "-";
 /* ---------- Admin roles & permissions ---------- */
-const ADM_TABS = [["dash","Dashboard"],["users","Users"],["ipscan","IP scanner"],["newu","New users"],["orders","Buy orders"],["sells","Sell orders"],["refer","Refer program"],["redeem","Redeem codes"],["transfer","Transfer"],["settings","Settings"]];
+const ADM_TABS = [["dash","Dashboard"],["users","Users"],["ipscan","IP scanner"],["newu","New users"],["orders","Buy orders"],["sells","Sell orders"],["usdt","USDT orders"],["refer","Refer program"],["redeem","Redeem codes"],["transfer","Transfer"],["settings","Settings"]];
 const ADM_ROLE = { owner:"Owner", admin:"Admin", subadmin:"Sub admin", viewer:"Viewer" };
 const ADM_PRESET = { admin:ADM_TABS.map(x=>x[0]), subadmin:["users","newu","ipscan","orders","sells"], viewer:ADM_TABS.map(x=>x[0]) };
 const VIEW_OK = ["login","logout","goback","tab","cp","ttab","tfhist","uhist","hist","shist","ofilter","sofilter","rccopy","scopy"];   /* buttons a Viewer may press */
@@ -222,12 +222,15 @@ function dash(){
     const wd = k => S.sells.filter(o=>o.status===k && T(doneAt(o)));
     const wc = (t,k) => { const l = wd(k); return c(t,amt(l),l.length+" order"+(l.length===1?"":"s")); };
     const nu = live.filter(u=>T(tms(u.createdAt)));
+    const ud = S.usdtOrders.filter(o=>o.status==="success" && T(doneAt(o)));
+    const udUsdt = ud.reduce((a,o)=>a+Number(o.usdt||0),0), udBdt = ud.reduce((a,o)=>a+Number(o.amount||0),0);
     return c("Transferred",amt(tr),tr.length+" transfer"+(tr.length===1?"":"s"))
       + c("Buy success",amt(by),by.length+" order"+(by.length===1?"":"s"))
       + wc("Withdraw success","success")
       + wc("Withdraw pending","processing")
       + wc("Withdraw failed","failed")
       + wc("Withdraw lock","lock")
+      + c("USDT deposit",fmt(udUsdt)+" USDT",fmt(udBdt)+" BDT · "+ud.length+" order"+(ud.length===1?"":"s"))
       + c("Buy orders created",amt(bc),bc.length+" order"+(bc.length===1?"":"s"))
       + c("New users",nu.length);
   };
@@ -450,6 +453,86 @@ async function loadSellWallets(uid){
   render();
 }
 window.filterSells = v => { S.sq = v; const b = $("#stb"); if (b) b.innerHTML = sellRows(); };
+
+/* ---------- USDT orders (user recharges with USDT) ---------- */
+const USL = { created:"Order created", pending:"Processing", success:"Success", failed:"Failed", lock:"Lock", cancelled:"Cancelled" };
+const USC = { created:"cr", pending:"fz", failed:"x", lock:"lk", cancelled:"off" };
+const URANK = { pending:0, created:1, lock:2, failed:3, cancelled:4, success:5 };
+const uTime = o => tms(o.createdAt) || (o.history && o.history[0] && o.history[0].at) || 0;
+function usdtList(){
+  const q = (S.uq||"").toLowerCase().trim();
+  return S.usdtOrders.filter(o => {
+    if (S.uf !== "all" && o.status !== S.uf) return false;
+    if (!q) return true;
+    const u = S.users.find(x=>x.id===o.userId) || {};
+    return [o.orderNo, o.id, o.txid, o.phone, o.amount, o.usdt, o.network, u.code, u.lastIp, uName(u), u.email].some(v => String(v??"").toLowerCase().includes(q));
+  }).sort((x,y) => ((URANK[x.status]??5) - (URANK[y.status]??5)) || (uTime(y) - uTime(x)));
+}
+function usdtUser(o){
+  const u = S.users.find(x=>x.id===o.userId), mut = "font-size:12px;color:var(--mute)";
+  if (!u) return `${cp(o.phone)}<br><span style="${mut}">User not found</span>`;
+  const as = uStatus(u);
+  return `${cp(uName(u))}<br><span style="${mut}">Refer code: <b style="color:var(--ink)">${esc(u.code||"-")}</b></span><br><span style="${mut}">IP: ${esc(u.lastIp||"-")}</span><br><span style="font-size:12px">${presCell(u)}${as!=="active" ? ` <span class="tag ${ACC_TC[as]||""}">${esc(ACC[as]||as)}</span>` : ""}</span><br><span style="font-size:12px;color:#0b7a55">Balance: <b>${fmt(u.balance||0)}</b> BDT</span>`;
+}
+function usdtRows(){
+  if (!S.usdtOrders.length) return `<tr><td colspan="6" style="color:var(--mute)">No USDT orders yet. They appear here when a user creates one in Buy → USDT.</td></tr>`;
+  const list = usdtList(); if (!list.length) return `<tr><td colspan="6" style="color:var(--mute)">No orders match this search / filter.</td></tr>`;
+  return list.map(o => {
+    const dup = o.txid && S.usdtOrders.some(x => x.id!==o.id && x.txid && x.txid.toLowerCase()===o.txid.toLowerCase());
+    const fin = o.status === "success";
+    const opts = (o.status==="created" || o.status==="cancelled" ? [[o.status, USL[o.status]]] : []).concat([["pending", o.status==="lock" ? "Processing (unlock)" : "Processing"],["success","Success"],["failed","Failed"],["lock","Lock"]]).map(([k,l])=>`<option value="${k}" ${k===o.status?"selected":""}>${l}</option>`).join("");
+    const act = fin ? `<span style="color:var(--mute);font-size:13px">Final</span> ` : `<select id="us_${o.id}" style="width:auto;padding:6px 8px;font-size:13px">${opts}</select> <button class="sm" data-uapply="${o.id}">Apply</button> `;
+    return `<tr><td>${esc(fdt(uTime(o)))}<br>${cp(o.orderNo||o.id.slice(0,8).toUpperCase())}</td><td>${usdtUser(o)}</td><td><b>${fmt(o.usdt)}</b> USDT<br><span style="font-size:12px;color:var(--mute)">${fmt(o.amount)} BDT + ${fmt(o.bonus)} bonus</span><br><span style="font-size:12px;color:var(--mute)">${esc(o.network||"USDT-BSC")} · rate ${fmt(o.rate)}</span></td><td style="max-width:170px;word-break:break-all;font-size:12px">${o.txid ? `<button class="cpb" data-cp="${esc(o.txid)}" title="Tap to copy" style="white-space:normal;text-align:left;word-break:break-all">${esc(o.txid)} ⧉</button>` : '<span style="color:var(--mute)">Not submitted</span>'}${dup ? '<br><span class="tag x">Duplicate TXID</span>' : ""}</td><td><span class="tag ${USC[o.status]||""}">${esc(USL[o.status]||o.status)}</span></td><td><div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;max-width:230px">${act}<button class="sm out" data-usdthist="${o.id}">History</button></div></td></tr>`;
+  }).join("");
+}
+function usdtView(){
+  const cnt = k => k==="all" ? S.usdtOrders.length : S.usdtOrders.filter(o=>o.status===k).length;
+  const fl = [["all","All"],["created","Order created"],["pending","Processing"],["success","Success"],["failed","Failed"],["lock","Lock"],["cancelled","Cancelled"]];
+  const off = !(S.usdtCfg && S.usdtCfg.address);
+  return `<h1>USDT orders</h1>
+  <input id="uq_s" placeholder="Search TXID, refer code, number, IP, order ID, amount..." value="${esc(S.uq)}" style="max-width:520px;margin-bottom:12px" oninput="window.usdtSearch(this.value)">
+  ${off ? `<div class="box" style="border-color:#f3b4ae;color:var(--red);font-size:14px">USDT recharge is OFF. Add your wallet address in <b>Settings → USDT recharge</b> so users can pay.</div>` : ""}
+  <div class="box"><p style="font-size:14px;color:var(--mute);line-height:1.6;margin-bottom:12px">Users create a USDT order, send USDT to your address and paste the transaction hash (TXID). Check the payment on the blockchain, then set <b>Success</b>: the recharge amount + bonus is added to the user's balance (only once, final). <b>Lock</b> holds an order for checking; choose <b>Processing (unlock)</b> to release it.</p>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${fl.map(([k,l])=>`<button class="sm ${S.uf===k?"":"out"}" data-ufilter="${k}">${l} (${cnt(k)})</button>`).join("")}</div>
+  <div style="overflow-x:auto"><table><thead><tr><th>Time / Order ID</th><th>User</th><th>USDT</th><th>TXID</th><th>Status</th><th>Change status</th></tr></thead><tbody id="utb">${usdtRows()}</tbody></table></div></div>`;
+}
+window.usdtSearch = v => { S.uq = v; const bd = $("#utb"); if (bd) bd.innerHTML = usdtRows(); };
+window.uHist = id => {
+  const o = S.usdtOrders.find(x=>x.id===id); if (!o) return;
+  const rows = (o.history||[]).slice().reverse().map(h => `<div style="padding:8px 0;border-top:1px solid var(--line);font-size:13px"><b>${esc(USL[h.status]||h.status)}</b> · ${esc(h.by||"")}${h.admin ? " ("+esc(h.admin)+")" : ""}<br><span style="color:var(--mute)">${esc(fdt(h.at))}${h.note ? " · "+esc(h.note) : ""}</span></div>`).join("");
+  modal(`<h2>Order history</h2><p style="font-size:13px;color:var(--mute);margin:4px 0 8px">${esc(o.orderNo||id)}</p>${rows || "<p>No history.</p>"}<button class="sm out" style="margin-top:14px" onclick="this.closest('.modal').remove()">Close</button>`);
+};
+async function usdtSetStatus(id, ns){
+  const o = S.usdtOrders.find(x=>x.id===id); if (!o) return;
+  if (o.status === "success") return toast("A successful order cannot be changed");
+  if (o.status === ns) return toast("Already "+USL[ns]);
+  const total = round2(Number(o.amount||0) + Number(o.bonus||0));
+  if (ns === "success") {
+    if (!o.txid && !confirm("This user has NOT submitted a TXID yet. Mark Success anyway?")) return;
+    const warn = Number(o.bonusPct||0) > Number(S.rates.bonus||0) + 0.0001 ? "\nWARNING: this order's bonus ("+o.bonusPct+"%) is higher than the current bonus setting ("+S.rates.bonus+"%).\n" : "";
+    if (!confirm("Mark SUCCESS?\nThis adds "+fmt(o.amount)+" + "+fmt(o.bonus)+" bonus = "+fmt(total)+" BDT to the user's balance (only once)."+warn+"\nCheck that "+fmt(o.usdt)+" USDT really arrived.")) return;
+  } else if (!confirm("Change this USDT order to "+USL[ns]+"?")) return;
+  const entry = { status:ns, by:"admin", admin:(auth?.currentUser?.email)||"admin", at:Date.now(), note:"Status changed by admin" };
+  try {
+    if (DEMO) { o.status = ns; o.history = [...(o.history||[]), entry]; render(); return toast("Status: "+USL[ns]); }
+    if (ns === "success") {
+      await fb.runTransaction(db, async t => {
+        const oRef = fb.doc(db,"usdtOrders",id), os = await t.get(oRef);
+        if (!os.exists()) throw new Error("Order not found");
+        const od = os.data(); if (od.status === "success" || od.credited) throw new Error("Already success");
+        const uRef = fb.doc(db,"users",od.userId), us = await t.get(uRef);
+        if (!us.exists()) throw new Error("User profile not found");
+        const u = us.data(), day = todayS(), fresh = u.statsDate !== day, amt = Number(od.amount)||0, bn = Number(od.bonus)||0, tt = round2(amt + bn), nb = round2((Number(u.balance)||0) + tt);
+        t.update(oRef, { status:"success", credited:true, reviewedAt:fb.serverTimestamp(), history:fb.arrayUnion(entry) });
+        t.update(uRef, { balance:nb, saleAmount:(fresh?0:(u.saleAmount||0)), saleOrders:(fresh?0:(u.saleOrders||0)), income:round2((fresh?0:(u.income||0)) + bn), purchaseAmount:(fresh?0:(u.purchaseAmount||0)), purchaseOrders:(fresh?0:(u.purchaseOrders||0)), statsDate:day });   /* USDT deposit does NOT count in home Purchase amount/orders - only tasks do */
+        t.set(fb.doc(fb.collection(db,"users",od.userId,"ledger"), id+"_usdt"), { kind:"usdt_recharge", direction:"credit", amount:tt, orderId:id, balanceAfter:nb, createdAt:fb.serverTimestamp() });
+      });
+    } else await fb.updateDoc(fb.doc(db,"usdtOrders",id), { status:ns, reviewedAt:fb.serverTimestamp(), history:fb.arrayUnion(entry) });
+    logAct(stCat(ns==="pending" ? "processing" : ns), "USDT order "+USL[ns]+" · "+fmt(o.amount)+" BDT / "+fmt(o.usdt)+" USDT", o.orderNo||id);
+    toast("Status: "+USL[ns]);
+  } catch(e) { toast("Failed: "+(e.code||e.message)); }
+}
+
 function sells(){
   const fl = [["all","All"],["processing","Processing"],["success","Success"],["failed","Failed"],["lock","Lock"]];
   const cnt = k => k==="all" ? S.sells.length : S.sells.filter(o=>o.status===k).length;
@@ -741,6 +824,11 @@ function settings(){
   const rows = S.reasons.map(r=>`<tr><td>${esc(r.label)}</td><td>${RT[r.type]||esc(r.type)}</td><td><button class="sm red" data-delreason="${esc(r.id)}">Delete</button></td></tr>`).join("");
   return `<h1>Settings</h1><div class="box" style="max-width:420px"><h3 style="margin-bottom:6px">Rates &amp; rewards</h3><label>USDT exchange (1 USDT = ? BDT)</label><input id="ru" type="number" step="0.01" value="${S.rates.usdt}">
   <label>USDT bonus %</label><input id="rb" type="number" step="0.1" value="${S.rates.bonus}"><button style="margin-top:16px" data-saverates>Save rates</button></div>
+  <div class="box" style="max-width:420px"><h3 style="margin-bottom:6px">USDT recharge</h3><p style="font-size:13px;color:var(--mute);line-height:1.5">Users see this wallet address when they create a USDT order (Buy → USDT). Leave the address empty to turn USDT recharge off.</p>
+  <label>Network name</label><input id="uc_n" placeholder="USDT-BSC" value="${esc((S.usdtCfg&&S.usdtCfg.network)||"USDT-BSC")}">
+  <label>Receiving wallet address</label><input id="uc_a" placeholder="0x..." autocomplete="off" value="${esc((S.usdtCfg&&S.usdtCfg.address)||"")}">
+  <label>Minimum amount (BDT)</label><input id="uc_min" type="number" min="1" value="${esc((S.usdtCfg&&S.usdtCfg.min)||700)}">
+  <label>Maximum amount (BDT)</label><input id="uc_max" type="number" min="1" value="${esc((S.usdtCfg&&S.usdtCfg.max)||999999)}"><button style="margin-top:14px" data-saveusdt>Save USDT settings</button></div>
   <div class="box" style="max-width:420px"><h3 style="margin-bottom:6px">Sign up bonus</h3><p style="font-size:13px;color:var(--mute);line-height:1.5">Amount a user gets once when they tap Claim in <b>Mine → New Rewards</b>. Each user can claim it only one time. Set 0 to turn it off.</p>
   <label>Bonus amount (BDT)</label><input id="sb_v" type="number" min="0" step="0.01" placeholder="e.g. 50" value="${S.bonus || ""}"><button style="margin-top:12px" data-savebonus>Save bonus</button></div>
   <div class="box" style="max-width:420px"><h3 style="margin-bottom:6px">Language</h3><p style="font-size:13px;color:var(--mute);line-height:1.5">Choose which languages users can pick in <b>Mine → Language</b>, and the default language. Users who have not chosen a language see the default. A user who picked a language that you later turn off will see the default again.</p>
@@ -1015,11 +1103,11 @@ window.addEventListener("popstate", e => {
   navLast = JSON.stringify(navSnap());
 });
 function render(){
-  const r = $("#root"), ae = document.activeElement, keepId = ae && (/^(nu_q|ip_q|ac_q|am_e|am_p|oq|sq|sf_a|sf_n|sf_q|rc_a|rc_c|rc_r|rc_m|tf_f|tf_t|tf_a|tf_n|tf_s|tl_v)$/.test(ae.id)) ? ae.id : null, keepOq = keepId ? ae.selectionStart : null;
+  const r = $("#root"), ae = document.activeElement, keepId = ae && (/^(nu_q|ip_q|ac_q|am_e|am_p|oq|sq|sf_a|sf_n|sf_q|rc_a|rc_c|rc_r|rc_m|tf_f|tf_t|tf_a|tf_n|tf_s|tl_v|uq_s)$/.test(ae.id)) ? ae.id : null, keepOq = keepId ? ae.selectionStart : null;
   if (!S.admin) { r.innerHTML = login(); return; }
   if (S.tab === "refer" && ae && ((ae.dataset && ae.dataset.rf === "pct") || ae.id === "rf_need" || ae.id === "rf_bonus")) return;   /* do not wipe a % being typed */
   const n=(k,l)=>`<button class="${S.tab===k?"act":""}${can(k)?"":" lckd"}" data-tab="${k}">${l}${can(k)?"":" 🔒"}</button>`;
-  r.innerHTML = `<div class="wrap"><aside><h2>Nova Pay Admin</h2><div class="who">${esc(adminEmail())} · ${esc(ADM_ROLE[(S.me&&S.me.role)||"owner"]||"")}</div>${n("dash","Dashboard")}${n("users","Users")}${n("ipscan","IP scanner")}${n("newu","New users")}${n("orders","Buy orders")}${n("sells","Sell orders")}${n("refer","Refer program")}${n("redeem","Redeem codes")}${n("transfer","Transfer")}${n("settings","Settings")}${n("adminmgr","Admin Manage")}${n("activity","Admin activity")}<button data-logout style="margin-top:18px;background:rgba(255,255,255,.18);color:#fff">Log out</button></aside><main>${navIdx>0 ? `<button class="sm out" data-goback style="margin-bottom:10px">‹ Back</button>` : ""}${can(S.tab) ? ({dash,users,ipscan:ipScan,newu:newUsers,orders,sells,refer,redeem,transfer,settings,adminmgr:adminMgr,activity})[S.tab]() : lockedView()}</main></div>`;
+  r.innerHTML = `<div class="wrap"><aside><h2>Nova Pay Admin</h2><div class="who">${esc(adminEmail())} · ${esc(ADM_ROLE[(S.me&&S.me.role)||"owner"]||"")}</div>${n("dash","Dashboard")}${n("users","Users")}${n("ipscan","IP scanner")}${n("newu","New users")}${n("orders","Buy orders")}${n("sells","Sell orders")}${n("usdt","USDT orders")}${n("refer","Refer program")}${n("redeem","Redeem codes")}${n("transfer","Transfer")}${n("settings","Settings")}${n("adminmgr","Admin Manage")}${n("activity","Admin activity")}<button data-logout style="margin-top:18px;background:rgba(255,255,255,.18);color:#fff">Log out</button></aside><main>${navIdx>0 ? `<button class="sm out" data-goback style="margin-bottom:10px">‹ Back</button>` : ""}${can(S.tab) ? ({dash,users,ipscan:ipScan,newu:newUsers,orders,sells,usdt:usdtView,refer,redeem,transfer,settings,adminmgr:adminMgr,activity})[S.tab]() : lockedView()}</main></div>`;
   navSync();
   if (keepOq !== null) { const el = $("#"+keepId); if (el) { el.focus(); try { el.setSelectionRange(keepOq,keepOq); } catch {} } }
 }
@@ -1038,6 +1126,8 @@ function subscribe(){
       S.users = next; structural ? render() : refreshPresence(); }, err("users")),
     onSnapshot(collection(db,"buyOrders"), s=>{ S.orders=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, err("buyOrders")),
     onSnapshot(collection(db,"sellOrders"), s=>{ S.sells=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, err("sellOrders")),
+    onSnapshot(collection(db,"usdtOrders"), s=>{ S.usdtOrders=s.docs.map(d=>({id:d.id,...d.data()})); if(S.tab==="usdt"||S.tab==="dash") render(); }, err("usdtOrders")),
+    onSnapshot(doc(db,"settings","usdt"), s=>{ S.usdtCfg = s.exists() ? s.data() : null; if(S.tab!=="settings") render(); }, ()=>{}),
     onSnapshot(doc(db,"settings","transferLimit"), s=>{ S.transferLimit = s.exists() ? (Number(s.data().perUserPerDay)||0) : 0; if(S.tab!=="settings") render(); }, ()=>{}),
     onSnapshot(doc(db,"settings","language"), s=>{ S.langCfg = s.exists() ? s.data() : null; if(S.tab!=="settings") render(); }, ()=>{}),
     onSnapshot(doc(db,"settings","signupBonus"), s=>{ S.bonus = s.exists() ? (Number(s.data().amount)||0) : 0; if(S.tab!=="settings") render(); }, ()=>{}),
@@ -1198,7 +1288,7 @@ async function creditSuccess(id, entry){
         const nb = addPay(p.c, p.amt);
         t.set(fb.doc(LG(p.c.uid), id+"_ref"+p.i), { kind:"referral", direction:"credit", amount:p.amt, level:p.i, levelName:lvName(p.i), pct:p.pct, orderId:id, fromUid:od.claimedBy, balanceAfter:nb, createdAt:fb.serverTimestamp() });
       });
-      Object.assign(uu, { balance:Math.round(((u.balance||0)+od.amount+reward)*100)/100, income:(fresh?0:(u.income||0))+reward, purchaseAmount:(fresh?0:(u.purchaseAmount||0))+od.amount, purchaseOrders:(fresh?0:(u.purchaseOrders||0))+1, statsDate:day });
+      Object.assign(uu, { balance:Math.round(((u.balance||0)+od.amount+reward)*100)/100, saleAmount:(fresh?0:(u.saleAmount||0)), saleOrders:(fresh?0:(u.saleOrders||0)), income:(fresh?0:(u.income||0))+reward, purchaseAmount:(fresh?0:(u.purchaseAmount||0))+od.amount, purchaseOrders:(fresh?0:(u.purchaseOrders||0))+1, statsDate:day });
       const L = LG(od.claimedBy);
       t.set(fb.doc(L,id+"_buy"), { kind:"purchase", amount:od.amount, orderId:id, createdAt:fb.serverTimestamp() });
       t.set(fb.doc(L,id+"_reward"), { kind:"reward", amount:reward, orderId:id, createdAt:fb.serverTimestamp() });
@@ -1349,7 +1439,7 @@ async function setSellStatus(id, ns){
   try {
     if (DEMO) {
       if (ns==="failed") { const u = S.users.find(x=>x.id===o.userId); if (u) u.balance = Number(u.balance||0)+Number(o.amount||0); o.refunded = true; }
-      if (ns==="success") { const u = S.users.find(x=>x.id===o.userId); if (u) { u.saleAmount = Number(u.saleAmount||0)+Number(o.amount||0); u.saleOrders = Number(u.saleOrders||0)+1; } }
+      if (ns==="success") { const u = S.users.find(x=>x.id===o.userId); if (u) { const fr = u.statsDate !== todayS(); if (fr) { u.income = 0; u.purchaseAmount = 0; u.purchaseOrders = 0; } u.saleAmount = (fr?0:Number(u.saleAmount||0))+Number(o.amount||0); u.saleOrders = (fr?0:Number(u.saleOrders||0))+1; u.statsDate = todayS(); } }
       logAct(stCat(ns), "Withdraw status changed: "+SL[o.status]+" → "+SL[ns]+" · "+fmt(o.amount)+" BDT", sNo(o)); o.status = ns; o.history = [...(o.history||[]), entry]; render(); return toast("Status: "+SL[ns]);
     }
     const sRef = fb.doc(db,"sellOrders",id);
@@ -1371,7 +1461,8 @@ async function setSellStatus(id, ns){
         const uRef = fb.doc(db,"users",sd.userId), us = await t.get(uRef); if (!us.exists()) throw new Error("User not found");
         const ud = us.data();
         t.update(sRef, { status:"success", reviewedAt:fb.serverTimestamp(), history:fb.arrayUnion(entry) });
-        t.update(uRef, { saleAmount:Math.round((Number(ud.saleAmount||0)+Number(sd.amount||0))*100)/100, saleOrders:Number(ud.saleOrders||0)+1 });
+        const fr = ud.statsDate !== todayS();   /* new Bangladesh day: today's numbers start from 0 */
+        t.update(uRef, { saleAmount:Math.round(((fr?0:Number(ud.saleAmount||0))+Number(sd.amount||0))*100)/100, saleOrders:(fr?0:Number(ud.saleOrders||0))+1, ...(fr ? { income:0, purchaseAmount:0, purchaseOrders:0 } : {}), statsDate:todayS() });
       });
     } else {
       await fb.updateDoc(sRef, { status:ns, reviewedAt:fb.serverTimestamp(), history:fb.arrayUnion(entry) });
@@ -1675,6 +1766,15 @@ document.addEventListener("click", async e=>{
     const v = Math.max(0, Math.round((Number($("#sb_v").value)||0)*100)/100);
     try { if (!DEMO) await fb.setDoc(fb.doc(db,"settings","signupBonus"), { amount:v }); S.bonus = v; logAct("settings","Sign up bonus "+(v ? "set to "+fmt(v)+" BDT" : "turned off"), "Sign up bonus"); render(); toast(v ? "Sign up bonus saved: "+fmt(v)+" BDT" : "Sign up bonus turned off"); } catch(e) { toast("Failed: "+(e.code||e.message)); }
   }
+  else if ("saveusdt" in d) {
+    const c = { network:$("#uc_n").value.trim() || "USDT-BSC", address:$("#uc_a").value.trim(), min:Math.max(1,Math.floor(Number($("#uc_min").value)||700)), max:Math.max(1,Math.floor(Number($("#uc_max").value)||999999)) };
+    if (c.max < c.min) return toast("Maximum must be bigger than minimum");
+    try { if (!DEMO) await fb.setDoc(fb.doc(db,"settings","usdt"), c); S.usdtCfg = c; logAct("settings","USDT recharge settings saved ("+c.network+", "+(c.address ? c.address.slice(0,8)+"..." : "off")+")","USDT recharge"); toast(c.address ? "USDT settings saved" : "Saved. USDT recharge is OFF (no address)"); }
+    catch(e) { toast("Failed: "+(e.code||e.message)); }
+  }
+  else if ("ufilter" in d) { S.uf = d.ufilter; render(); }
+  else if ("uapply" in d) { const el = $("#us_"+d.uapply); if (el) usdtSetStatus(d.uapply, el.value); }
+  else if ("usdthist" in d) { window.uHist(d.usdthist); }
   else if ("saverates" in d) {
     const r = { usdt:Number($("#ru").value), bonus:Number($("#rb").value) };
     if (DEMO) S.rates=r; else await fb.setDoc(fb.doc(db,"settings","rates"),r);
