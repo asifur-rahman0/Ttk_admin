@@ -1371,6 +1371,66 @@ async function rebuildTeam(){
   } catch(e) { toast("Rebuild failed: "+(e.code||e.message)); }
 }
 
+/* A task that was created with a withdraw Order ID: when linked tasks that reached Success cover the whole withdraw amount, the withdraw becomes Success automatically (same result as pressing Success on it) */
+async function autoSellSuccess(taskId){
+  try {
+    const entry = { status:"success", by:"admin", admin:adminEmail(), at:Date.now(), note:"Auto success: linked task succeeded" };
+    if (DEMO) {
+      const t = S.orders.find(x=>x.id===taskId), sd = t && t.sellOrderId ? S.sells.find(x=>x.id===t.sellOrderId) : null;
+      if (!sd || sd.status==="success" || sd.status==="failed" || sellPaid(sd) < Number(sd.amount||0)) return;
+      const u = S.users.find(x=>x.id===sd.userId); if (u) { const fr = u.statsDate !== todayS(); if (fr) { u.income = 0; u.purchaseAmount = 0; u.purchaseOrders = 0; } u.saleAmount = (fr?0:Number(u.saleAmount||0))+Number(sd.amount||0); u.saleOrders = (fr?0:Number(u.saleOrders||0))+1; u.statsDate = todayS(); }
+      sd.status = "success"; sd.history = [...(sd.history||[]), entry];
+      logAct("success", "Withdraw auto success (task done) · "+fmt(sd.amount)+" BDT", sNo(sd)); toast("Withdraw "+sNo(sd)+" is now Success"); return;
+    }
+    const ts = await fb.getDoc(fb.doc(db,"buyOrders",taskId)), sid = ts.exists() ? ts.data().sellOrderId : null;
+    if (!sid) return;
+    const linked = await fb.getDocs(fb.query(fb.collection(db,"buyOrders"), fb.where("sellOrderId","==",sid)));
+    const paid = round2(linked.docs.map(d=>({ id:d.id, ...d.data() })).filter(x=>OS(x)==="success").reduce((a,x)=>a+Number(x.amount||0),0));
+    const sRef = fb.doc(db,"sellOrders",sid);
+    const done = await fb.runTransaction(db, async t => {
+      const ss = await t.get(sRef); if (!ss.exists()) return null;
+      const sd = ss.data(); if (sd.status==="success" || sd.status==="failed") return null;   /* already final: leave it */
+      if (paid < Number(sd.amount||0)) return null;                                               /* part of the amount is still not paid by a successful task */
+      const uRef = fb.doc(db,"users",sd.userId), us = await t.get(uRef); if (!us.exists()) return null;
+      const ud = us.data(), fr = ud.statsDate !== todayS();
+      t.update(sRef, { status:"success", reviewedAt:fb.serverTimestamp(), history:fb.arrayUnion(entry) });
+      t.update(uRef, { saleAmount:Math.round(((fr?0:Number(ud.saleAmount||0))+Number(sd.amount||0))*100)/100, saleOrders:(fr?0:Number(ud.saleOrders||0))+1, ...(fr ? { income:0, purchaseAmount:0, purchaseOrders:0 } : {}), statsDate:todayS() });
+      return sd;
+    });
+    if (done) { logAct("success", "Withdraw auto success (task done) · "+fmt(done.amount)+" BDT", done.orderNo||sid); toast("Withdraw "+(done.orderNo||sid.slice(0,8).toUpperCase())+" is now Success"); }
+  } catch(e) { console.error(e); toast("Task is Success, but the withdraw could not be updated: "+(e.code||e.message)); }
+}
+
+/* A linked task that was Success and then became Failed: the withdraw it paid becomes Failed too and the money goes back to the user (once) */
+async function autoSellFail(taskId){
+  try {
+    const entry = { status:"failed", by:"admin", admin:adminEmail(), at:Date.now(), note:"Auto failed: linked task failed after success" };
+    if (DEMO) {
+      const t = S.orders.find(x=>x.id===taskId), sd = t && t.sellOrderId ? S.sells.find(x=>x.id===t.sellOrderId) : null;
+      if (!sd || sd.status!=="success") return;
+      const u = S.users.find(x=>x.id===sd.userId); if (u) { u.balance = Number(u.balance||0)+Number(sd.amount||0); if (u.statsDate === todayS()) { u.saleAmount = Math.max(0, round2(Number(u.saleAmount||0)-Number(sd.amount||0))); u.saleOrders = Math.max(0, Number(u.saleOrders||0)-1); } }
+      sd.status = "failed"; sd.refunded = true; sd.history = [...(sd.history||[]), entry];
+      logAct("failed", "Withdraw auto failed (task failed) · "+fmt(sd.amount)+" BDT (refunded)", sNo(sd)); toast("Withdraw "+sNo(sd)+" is now Failed and refunded"); return;
+    }
+    const ts = await fb.getDoc(fb.doc(db,"buyOrders",taskId)), sid = ts.exists() ? ts.data().sellOrderId : null;
+    if (!sid) return;
+    const sRef = fb.doc(db,"sellOrders",sid);
+    const done = await fb.runTransaction(db, async t => {
+      const ss = await t.get(sRef); if (!ss.exists()) return null;
+      const sd = ss.data(); if (sd.status !== "success") return null;      /* only a withdraw that was already Success is turned to Failed */
+      const uRef = fb.doc(db,"users",sd.userId), us = await t.get(uRef); if (!us.exists()) return null;
+      const ud = us.data(), amt = Number(sd.amount||0), nb = round2(Number(ud.balance||0)+amt);
+      const rv = sd.reviewedAt && sd.reviewedAt.toMillis ? sd.reviewedAt.toMillis() : 0;
+      const sameDay = ud.statsDate === todayS() && (!rv || new Date(rv+6*3600*1000).toISOString().slice(0,10) === todayS());   /* take it back from today's Sale numbers only if it was counted today */
+      t.update(sRef, { status:"failed", refunded:true, reviewedAt:fb.serverTimestamp(), history:fb.arrayUnion(entry) });
+      t.update(uRef, { balance:nb, ...(sameDay ? { saleAmount:Math.max(0, round2(Number(ud.saleAmount||0)-amt)), saleOrders:Math.max(0, (Number(ud.saleOrders)||0)-1) } : {}) });
+      t.set(fb.doc(fb.collection(db,"users",sd.userId,"ledger")), { kind:"withdraw_refund", direction:"credit", amount:amt, orderId:sid, balanceAfter:nb, createdAt:fb.serverTimestamp() });
+      return sd;
+    });
+    if (done) { logAct("failed", "Withdraw auto failed (task failed) · "+fmt(done.amount)+" BDT (refunded)", done.orderNo||sid); toast("Withdraw "+(done.orderNo||sid.slice(0,8).toUpperCase())+" is now Failed and refunded"); }
+  } catch(e) { console.error(e); toast("Task is Failed, but the withdraw could not be updated: "+(e.code||e.message)); }
+}
+
 async function setStatus(id, ns){
   const o = S.orders.find(x=>x.id===id); if (!o) return;
   const cur = OS(o), claimed = !!o.claimedBy;
@@ -1383,9 +1443,9 @@ async function setStatus(id, ns){
   if (ns !== "success" && !confirm(msg)) { render(); return; }   /* Success needs no popup: money + referral commission are added automatically */
   const entry = { status:ns, by:"admin", admin:(auth?.currentUser?.email)||"admin", at:Date.now(), note:"Status changed by admin" };
   try {
-    if (DEMO) { o.status = ns; if (ns === "open") { o.claimedBy = null; o.payMethod = null; } o.history = [...(o.history||[]), entry]; logAct(stCat(ns), "Task status changed: "+LBL[cur]+" → "+LBL[ns]+" · "+fmt(o.amount)+" BDT", o.mask||id); render(); return toast("Status: "+LBL[ns]); }
-    if (ns === "success") await creditSuccess(id, entry);
-    else if (ns === "failed" && (((o.refPaid||[]).length && !o.refReversed) || ((o.credited || cur === "success") && !o.taskReversed))) await reverseRef(id, entry);
+    if (DEMO) { o.status = ns; if (ns === "open") { o.claimedBy = null; o.payMethod = null; } o.history = [...(o.history||[]), entry]; logAct(stCat(ns), "Task status changed: "+LBL[cur]+" → "+LBL[ns]+" · "+fmt(o.amount)+" BDT", o.mask||id); if (ns === "success") await autoSellSuccess(id); if (ns === "failed" && cur === "success") await autoSellFail(id); render(); return toast("Status: "+LBL[ns]); }
+    if (ns === "success") { await creditSuccess(id, entry); await autoSellSuccess(id); }
+    else if (ns === "failed" && (((o.refPaid||[]).length && !o.refReversed) || ((o.credited || cur === "success") && !o.taskReversed))) { await reverseRef(id, entry); if (cur === "success") await autoSellFail(id); }
     else {
       const d = { status:ns, reviewedAt:fb.serverTimestamp(), history:fb.arrayUnion(entry) };
       if (o.status === "done" || o.status === "claimed") d.credited = true;   /* old approved orders were already credited */
